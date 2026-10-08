@@ -1,0 +1,14 @@
+{
+  "name": "goal-orchestrator-marketplace",
+  "owner": { "name": "WaniiDev" },
+  "description": "Ship a goal (an issue and its sub-issues) as one verified PR with a team of sub-agents.",
+  "plugins": [
+    {
+      "name": "goal-orchestrator",
+      "source": "./plugins/goal-orchestrator",
+      "description": "Orchestrate implementer and reviewer sub-agents in waves to ship a multi-issue goal as one PR, verified end to end, with tracker updates and a final report.",
+      "category": "productivity",
+      "tags": ["orchestration", "subagents", "worktrees", "pull-requests", "linear"]
+    }
+  ]
+}
