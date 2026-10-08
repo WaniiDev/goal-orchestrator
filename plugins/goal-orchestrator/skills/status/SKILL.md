@@ -16,7 +16,10 @@ Format (no prose, no preamble):
 - 🔄 <ID> <a few words>
 
 **Reviews**
+- ✅ <ID> lane gate: claims reproduced (<n> pass)
+- 🔄 <ID> lane review (high-risk: <why>)
 - ✅ Wave 1 review: <n> findings, all fixed
+- ⏳ Final review + UI audit
 
 **Checks**
 - ✅ typecheck, lint, unused code

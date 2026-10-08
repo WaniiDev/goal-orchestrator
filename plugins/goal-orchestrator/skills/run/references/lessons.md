@@ -14,7 +14,9 @@ Each of these cost a run an hour or more. Apply them by default.
 - **Sub-agents cannot write report files** (the harness refuses). They return findings as text; you save them.
 - **Give every agent its own database and port**, and forbid touching others'. Shared databases make journeys flaky as data piles up.
 - **Never let an agent kill by pattern** (`pkill -f`, `kill $(pgrep …)`). One run killed other lanes' servers. Kill only PIDs you launched.
-- Agents report "all green" while a check failed when they read `| tail`. Ask for exact commands and counts, and spot-check one claim per report.
+- Agents report "all green" while a check failed when they read `| tail`. Ask for exact commands and counts; the lane gate re-runs them before every merge.
+- The costly bugs of one real run (a lock-order deadlock, a draft that silently overwrote another admin's change) sat in lanes that touched concurrency and data integrity. Tag such lanes high-risk so they get their own review before they merge, not a wave later.
+- Tests passing did not mean the screens matched the design: a UI goal shipped green and came back with 118 visual and motion findings. The UI audit runs before the PR opens.
 - Long-running agents lose track of shared-file ownership. Name the files each lane owns and the files to avoid, in every prompt.
 
 ## Tests

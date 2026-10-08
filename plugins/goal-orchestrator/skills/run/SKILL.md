@@ -63,7 +63,8 @@ On every turn of a run (after `/goal` starts a turn, after a compaction, after a
 - A **lane** is one issue (or a tight group) that one implementer owns end to end, with its files. A **wave** is a set of lanes that can run at the same time.
 - Two lanes that edit the same files never run in the same wave; order them by dependency (schema and server before UI, shared primitives before screens that use them). Docs-only and test-only lanes can ride along.
 - Size: three to five lanes per wave. Review each wave before the next starts.
-- Write the plan into `RUN.md` (waves, lanes, owned files, per-lane DB name and port) and into the task list (`TaskCreate`, one task per wave plus "Final gate" and "Deliver").
+- **Tag each lane's risk.** `high` when it touches data integrity (writes that can overwrite or lose data, drafts, merges of concurrent edits), security (authentication, authorization, permissions, secrets, input validation at a trust boundary), schema or migrations, money, or concurrency (locks, transactions, races, realtime ordering); `normal` otherwise. When unsure, `high`. The tag decides the lane review in Step 3.
+- Write the plan into `RUN.md` (waves, lanes, risk, owned files, per-lane DB name and port) and into the task list (`TaskCreate`, one task per wave plus "Final gate" and "Deliver").
 - Write `BRIEF.md` from [references/brief-template.md](references/brief-template.md), filled with this repo's facts. Every implementer reads it first.
 
 ## Step 3: Run a wave
@@ -73,12 +74,19 @@ For each lane:
 2. Launch the implementer **in the background**: `Agent` with `subagent_type: "goal-orchestrator:implementer"`, plus the `model` and `effort` from `RUN.md`, `run_in_background: true`, and a prompt that names: the worktree path (work only there), `BRIEF.md`, the issue(s) with their Done-when items, the owned files and the files to avoid, the DB name and port, the e2e filter to run at the end, and the report format.
 3. While lanes run, do not duplicate their work. Prepare the next wave's briefs, or answer what comes back.
 
-When a lane reports:
-- Read the report against the Done-when items. Missing items or failing checks go back to the **same** agent (`SendMessage`) with the exact gap.
+When a lane reports, it passes the **review ladder** before it merges. Each rung is cheaper than the one after it, so most problems are caught where they cost least:
+
+1. **Lane gate (every lane, no agent).** In the lane's worktree, re-run yourself the commands its report lists (typecheck, lint, its focused tests, its e2e filter) and compare exit codes and counts with what it claimed. Read the diff (`git diff <feature-branch>...lane-<id> --stat`, then the files) against each Done-when item, the owned-files list and the invariants in `BRIEF.md`. A claim that does not reproduce, a missing Done-when item, a file outside its ownership or a broken invariant goes back to the **same** agent (`SendMessage`) with the exact gap and output. Record the gate result per lane in `RUN.md`.
+2. **Lane review (high-risk lanes only).** After the gate passes, launch `goal-orchestrator:reviewer` (model and effort from `RUN.md`) on that lane alone, in a fresh worktree on `lane-<id>`, with the lane review brief in [references/review-brief.md](references/review-brief.md). Must-fix findings go back to the same implementer; merge only when the reviewer's must-fix list is empty or each item is fixed and re-gated.
+3. Wave review and final review follow in Step 4 and Step 5.
+
+Then:
 - Merge: `git merge --no-ff lane-<id> -m "Merge <ISSUE>: <summary>"` plus the repo's attribution trailers. Resolve conflicts by hand: per hunk, keep both sides' intent; for docs where both lanes edited the same paragraph, merge the sentences. Enable `git rerere`.
 - After every merge, run the fast checks yourself (typecheck, lint, unused code, the focused tests of the merged area). Stage **every** file you touched while resolving before you commit (`git status --short` must be empty after the commit). Push.
 
 ## Step 4: Review the wave
+
+Every lane of the wave has passed its gate (and, if high-risk, its lane review) and is merged. The wave review looks for what single-lane checks cannot see: lanes that clash (two changes to the same flow, a contract one lane changed and another still uses), and the wave's diff as a whole against its issues.
 
 When a wave is merged, launch the reviewer (`subagent_type: "goal-orchestrator:reviewer"`, model and effort from `RUN.md`), working in a fresh worktree you create from the feature branch's head, with [references/review-brief.md](references/review-brief.md) (wave review). For UI work, also launch `goal-orchestrator:ui-auditor` per area (list screens, dialogs and drawers, motion), each with its own DB and port, comparing real screenshots with the design reference.
 
@@ -97,7 +105,7 @@ On the feature branch's head, run everything yourself (background the long ones)
 - schema verification, if any,
 - the **full** e2e suite with the flags the goal needs.
 
-Then launch one **whole-diff final review** (reviewer, from a fresh worktree) plus, for UI goals, a visual re-verification against the design reference. Fix what it finds (Step 3), and re-run the gate on the new head. A flaky test is never "flake": root-cause it (product bug or test bug) and fix it, proven by repeats (`--repeat-each=10`) and one run inside the full suite.
+Then launch one **whole-diff final review** (reviewer, from a fresh worktree). For any goal that changes UI, also launch `goal-orchestrator:ui-auditor` per area (screens, dialogs and drawers, motion) against the design reference: this visual and motion audit is **required before the PR opens**, not optional; tests passing does not mean the screens match the reference. Fix what they find (Step 3, through the same ladder), and re-run the gate on the new head. A flaky test is never "flake": root-cause it (product bug or test bug) and fix it, proven by repeats (`--repeat-each=10`) and one run inside the full suite.
 
 ## Step 6: Deliver
 

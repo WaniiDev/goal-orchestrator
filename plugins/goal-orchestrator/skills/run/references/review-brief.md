@@ -2,10 +2,18 @@
 
 Reviewers never fix code. They return findings as text; you save them to the scratchpad and turn them into fix lanes. Give each reviewer a fresh worktree created from the feature branch head (`git worktree add -b review-<n> <path> <feature-branch>`), its own DB and port if it must run the app, and these instructions.
 
+## Lane review (high-risk lanes, before merge)
+
+```
+Work only in <worktree> (on lane-<id> at <sha>). Review this one lane: `git diff <feature-branch>...HEAD`. Its issue and Done-when items: <list>. Why it is high-risk: <data integrity | security | schema | money | concurrency>. Repo rules: <steering files>.
+Go deep on the risk named: trace every write path from a real caller (who can trigger it, with what input, concurrently with what), check authorization before data access, check transactions and lock order, check what happens on partial failure, retry and double submit, and check that tests cover the dangerous cases (not only the happy path). Prove each finding with a concrete scenario (inputs and interleaving → wrong result) and, where cheap, a failing test or probe.
+Final message: findings ranked must-fix / should-fix / nit, each with file:line, the scenario and the fix; then the checks you ran.
+```
+
 ## Wave review (after each wave)
 
 ```
-Work only in <worktree> (on <feature-branch> at <sha>). Review the diff of this wave: `git diff <sha-before-wave>..HEAD`. Issues in this wave and their Done-when items: <list>. Repo rules: <steering files>.
+Work only in <worktree> (on <feature-branch> at <sha>). Review the diff of this wave: `git diff <sha-before-wave>..HEAD`. Each lane already passed its own gate (and high-risk lanes a lane review): spend most effort on how the lanes interact (shared flows, changed contracts, ordering, duplicated logic) and on the wave against its issues as a whole. Issues in this wave and their Done-when items: <list>. Repo rules: <steering files>.
 Find, verify and rank:
 - correctness bugs (state, races, stale closures, error paths, transactions, idempotency), data integrity, security (authn/authz, input validation, secrets in logs),
 - invariant violations (<list>), tests that assert nothing or were weakened, missing tests for Done-when items,

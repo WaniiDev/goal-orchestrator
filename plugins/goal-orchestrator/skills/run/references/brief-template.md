@@ -37,6 +37,6 @@ You are one implementer in a multi-agent build of <goal>. The orchestrator gives
 - Worktree, branch, commit SHA(s).
 - Files changed, one line each.
 - Each Done-when item: met / not met, with the test or screenshot that proves it.
-- Every check you ran: exact command, pass/fail with counts.
+- Every check you ran: exact command (runnable as written from the worktree root), pass/fail with counts. The orchestrator re-runs these before merging; a claim that does not reproduce sends the lane back.
 - Decisions you made, and anything you could not finish and why.
 ```

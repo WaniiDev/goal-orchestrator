@@ -37,12 +37,22 @@ claude -p "/goal Using goal-orchestrator, ship WAN-400 as one PR, CI green, PR o
 
 1. **Intake and goal**: models and effort per role, away or around, finish line, results; then goal mode is armed.
 2. **Recon and plan**: the repo's steering docs and every issue; waves of lanes that never edit the same files at the same time.
-3. **Waves**: implementers work in the background, each in a worktree created from the feature branch, with their own database and port. The orchestrator merges each lane and runs the fast checks.
-4. **Reviews**: a reviewer checks every wave. For UI goals, UI auditors also check, with real screenshots and motion captures. Findings become fix lanes.
-5. **Final gate**: typecheck, lint, unused code, full unit and integration, schema verification, full e2e, then a whole-diff review. Flaky tests are root-caused.
+3. **Waves**: implementers work in the background, each in a worktree created from the feature branch, with their own database and port.
+4. **Review ladder**: each step is cheap where it can be, deep where it matters.
+   - **Lane gate (every lane, no agent):** before a lane merges, the orchestrator re-runs the checks the implementer reported and compares the counts. It also checks the diff against the Done-when items, the files the lane owns and the repo's invariants. A claim that doesn't reproduce sends the lane back.
+   - **Lane review (high-risk lanes only):** a reviewer checks the lane on its own before it merges. High-risk means data integrity, security, schema, money or concurrency.
+   - **Wave review:** after a wave merges, a reviewer looks for lanes that clash and checks the wave against its issues.
+   - **Final review:** a whole-diff review. For UI goals, a visual and motion audit against the design reference runs **before** the PR opens.
+5. **Final gate**: typecheck, lint, unused code, full unit and integration, schema verification, full e2e. Flaky tests are root-caused.
 6. **Deliver**: a PR with Issues, Decisions, Migrations, Ops notes and Tests. CI driven to green, the merge if you chose it, tracker checkpoints, and your final results.
 
 After a compaction or resume, the plugin's system-prompt section and `RUN.md` bring the run back to the step it was on.
+
+## Changes
+
+- **1.2.0**: the review ladder. Every lane passes a lane gate, and high-risk lanes get their own review before they merge. The wave review now focuses on how lanes interact. The UI audit is required before the PR opens.
+- **1.1.0**: goal mode. The `start_goal` tool queues a real `/goal`, and the finish line is kept in the system prompt.
+- **1.0.0**: first release.
 
 ## Install
 
