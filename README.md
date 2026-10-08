@@ -62,6 +62,18 @@ From a local folder:
 
 Or for one session: `claude --plugin-dir ./goal-orchestrator-marketplace/plugins/goal-orchestrator`.
 
+### Claude Code cloud sessions (claude.ai/code)
+
+Cloud sessions do not install plugins that a repository's `.claude/settings.json` enables, so install it in the cloud environment's **setup script** (environment menu in the session title bar → Edit → Setup script). The script runs before Claude starts. Put the lines after `#!/bin/bash`:
+
+```bash
+#!/bin/bash
+claude plugin marketplace add WaniiDev/goal-orchestrator || true
+claude plugin install goal-orchestrator@goal-orchestrator-marketplace --scope user || true
+```
+
+New sessions pick it up; running sessions do not. The setup script clones without your credentials, so this marketplace repository must be public (a private one fails with "could not read Username for 'https://github.com'"; check the session's setup log).
+
 ### Requirements
 
 - Claude Code 2.1.293 or newer. The `start_goal` tool is a function-hooks module, an early-access surface.
