@@ -1,18 +1,8 @@
 {
   "name": "goal-orchestrator",
   "version": "1.2.0",
-  "description": "Ship a goal (an issue and its sub-issues) as one PR in Claude Code goal mode: intake asks which models and effort to use, whether you will be away, the finish line and the results you want; then /goal holds the run to that finish line while implementer sub-agents work in waves in their own worktrees, every lane passes a gate that re-runs its checks, high-risk lanes get their own review, reviewers check every wave, a UI audit runs before the PR, and a final gate and whole-diff review run.",
-  "author": {
-    "name": "WaniiDev"
-  },
-  "keywords": [
-    "goal",
-    "orchestration",
-    "subagents",
-    "worktrees",
-    "pull-requests",
-    "review",
-    "linear"
-  ],
+  "description": "Ship a goal (an issue and its sub-issues) as one PR on one branch: intake asks which models and effort to use and whether you will be away, then implementer sub-agents work in waves in their own worktrees, reviewer sub-agents check every wave, a final gate and whole-diff review run, and you get the PR, tracker updates and a final report. A built-in watchdog ends the run as DONE, PARTIAL or BLOCKED instead of looping.",
+  "author": { "name": "WaniiDev" },
+  "keywords": ["orchestration", "subagents", "worktrees", "pull-requests", "review", "linear"],
   "types": "./types/index.d.ts"
 }

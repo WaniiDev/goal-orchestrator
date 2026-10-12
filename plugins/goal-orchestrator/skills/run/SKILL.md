@@ -1,122 +1,103 @@
 ---
 name: run
-description: Ship a goal (a tracker issue and its sub-issues, a plan doc, or a written goal) as ONE pull request on ONE branch in Claude Code goal mode, by orchestrating implementer and reviewer sub-agents in waves, verified end to end. Starts with an intake (models and effort per role, away or around, finish line, final results), then arms /goal so the run cannot lose its finish line.
-when_to_use: The user runs /goal-orchestrator:run, or a /goal condition or prompt names goal-orchestrator, or asks to ship several issues or a multi-step goal with sub-agents "as one PR" or "while I sleep".
+description: Ship a goal (a tracker issue and its sub-issues, a plan doc, or a written goal) as ONE pull request on ONE branch, with implementer and reviewer sub-agents in waves, verified end to end.
 argument-hint: "<goal: issue key(s), plan doc path, or a sentence> [--auto]"
+disable-model-invocation: true
 ---
 
 # Goal orchestrator
 
-You are the **orchestrator**. You do not write feature code yourself. You plan the work into waves of lanes, brief sub-agents, merge their work into one feature branch, have every wave reviewed, run the final gate, and deliver one PR with tracker updates and a final report. Your context is the scarce resource: delegate reading and building, keep conclusions.
+You plan, brief, merge, verify and deliver. Sub-agents read and build. Keep conclusions in your context, not file contents.
 
 Goal: $ARGUMENTS
 
-Supporting files (read them when the step says so):
-- [references/intake.md](references/intake.md): the intake questions and the defaults for `--auto`.
-- [references/brief-template.md](references/brief-template.md): the shared implementer brief.
-- [references/review-brief.md](references/review-brief.md): the wave review, the final review and the UI audit briefs.
-- [references/delivery.md](references/delivery.md): PR body, decisions log, tracker updates, final report.
-- [references/lessons.md](references/lessons.md): gotchas that cost real runs hours. Read it before Step 3.
-- The progress format lives in the `status` skill; the final report in the `report` skill.
+Read each reference only at its step: [intake](references/intake.md) (0), [brief template](references/brief-template.md) (2), [review prompts](references/review-brief.md) (4), [delivery](references/delivery.md) (6). Progress format: [status](../status/SKILL.md). Final results: [report](../report/SKILL.md).
 
-## Step 0: Intake (before any other work)
+**State** lives in the scratchpad (else `.orchestrator/` in the session temp dir): `RUN.md` (choices, plan, gate results), `DECISIONS.md` (one line per decision: what, why, which source), `BRIEF.md`, `reports/`. After a compaction, re-read `RUN.md` first. After a container restart, restart services (for example the DB) and relaunch lost background jobs.
 
-Follow [references/intake.md](references/intake.md). In one `AskUserQuestion` call (at most two), ask:
-1. implementer model and effort,
-2. reviewer model and effort,
-3. whether the user will be **away** (asleep, travelling) or **around**,
-4. the finish line (branch only, PR, or PR and merge when green), and the final results they want.
+## Step 0: Intake
 
-Skip the questions only when the goal says `--auto` or already answers them (for example "I'm asleep, use Sonnet medium to build and Opus xhigh to review, merge when green"). Then use the stated values, or the intake defaults, and say which values you used in one line.
+Follow [intake](references/intake.md).
+- **Away**: after intake, never ask or wait. Decide by issue text > plan doc > design reference > repo docs and ADRs > smallest safe option; log each decision. Push after every merge. Arm a `send_later` check-in while you wait on long work.
+- **Around**: ask only about scope, architecture, data model or anything destructive; still log decisions.
 
-Write the answers to `RUN.md` in the scratchpad (or a `.orchestrator/` folder in the session's temp dir if there is no scratchpad): goal, models, efforts, mode, finish line, results wanted, branch, start time. Every later step reads `RUN.md`; after a context compaction, re-read it first.
+## Step 1: Recon (cheap; send wide sweeps to an Explore agent)
 
-**Away mode** changes the whole run: never ask a question or wait for approval after intake. Decide every open point yourself in this order: issue text > plan doc > design reference > the repository's own docs and ADRs > the smallest safe option. Log each decision in `DECISIONS.md` with its reason; it becomes the PR's Decisions section. Push the branch after every merge so nothing is lost if the container is reclaimed. Arm a safety-net self check-in (`send_later`, if available) while you wait on long work.
+1. From the steering files (`AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING`, `README`, `TESTING`) and the CI config: app root, package manager, check commands (typecheck, lint, unused code, unit, integration, e2e, schema verification), invariants, doc owners, commit and PR conventions, tracker rules. Use the repo's code-graph index if it has one.
+2. The goal: every issue (Done-when, Not in scope, links), any plan doc and design reference. If a written goal has no Done-when items, write them into `RUN.md`.
+3. Environment: a test DB (native; no Docker unless the repo requires it), a browser for e2e, network access, and how each agent gets its own DB and port.
+4. Create or check out the feature branch (the session's designated branch if given), push it, and run `git config rerere.enabled true`.
+5. Run the fast checks once on the base. List any failures in `BRIEF.md` as pre-existing, so agents don't re-prove them.
+6. Load the run tools with one `ToolSearch` (`select:mcp__goal-orchestrator__run_start,mcp__goal-orchestrator__run_finish`), then call `run_start` (branch, absolute repo path, any budget the user gave).
 
-**Around mode**: ask only for decisions that change what gets built (scope, architecture, data model, anything destructive); still log every decision.
+## Step 2: Plan
 
-## Step 0b: Arm goal mode (the finish line must never be lost)
-
-A prompt is not enough to hold a long run to its finish line; Claude Code's goal mode is. `/goal <condition>` re-checks the condition after every turn and starts another turn until it is met, survives `--resume`, and waits while sub-agents run. Arm it right after intake, before recon:
-
-1. Write the condition from the intake answers, at most 4,000 characters, judged only from the conversation, so name each artefact and how it will show: for example "Using goal-orchestrator:run and RUN.md at <path>, <goal> ships as one PR from <branch>: every issue's Done-when items met, the final gate green on the PR head (typecheck, lint, full unit and integration, full e2e), the final review's findings fixed or logged, <PR merged into <base> with CI green | PR #… open with CI green>, <tracker issues Done with checkpoints>, and the final report posted. Stop as impossible only if <a blocker outside this session's reach, such as missing access>." Save it in `RUN.md`.
-2. **If this turn is already inside a /goal** (the person started it with `/goal …` naming this plugin), the goal is set: write the condition you are working to into `RUN.md` and go on.
-3. **Otherwise, arm it**, first match wins:
-   - the plugin's own tool `mcp__goal-orchestrator__start_goal` (its mod is loaded): call it with `condition` and `runFile` (the absolute path of `RUN.md`), say in one line that goal mode is armed, and **end your turn**. `/goal` starts when the turn ends and brings you back here: the next turn resumes from `RUN.md` (Step 0c).
-   - the built-in `ProposeGoal` tool, when the session offers it: `condition` at most 500 characters (shorten to the essentials, keep the full one in `RUN.md`); `ask_user: false` only when the person picked the finish line in the intake or stated it in their own words, otherwise `true`. End your turn.
-   - neither: in around mode, ask the person to type `/goal <condition>` (give it ready to paste) and stop until they do; in away mode, say so prominently in the run's first message and carry on: the plugin's system-prompt section and `RUN.md` still carry the finish line.
-4. Never clear or replace the goal yourself. Only the person ends it (`/goal clear`).
-
-## Step 0c: Resume
-
-On every turn of a run (after `/goal` starts a turn, after a compaction, after a resume), read `RUN.md` first and continue from the step it records. Never repeat the intake for a goal that already has a `RUN.md`. Keep `RUN.md` current after every step: waves done, lanes running with their agents, merges, gate results, PR number, tracker state.
-
-## Step 1: Recon (orchestrator, cheap)
-
-1. Read the repository's steering files (`AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `README`, `TESTING`), and find: the app root, the package manager, the check commands (typecheck, lint, unused-code, unit, integration, e2e, schema verification), the invariants, the doc owners, the commit and PR conventions, and the tracker rules (for example a checkpoint format and a linter).
-2. Read the goal: the parent issue and every sub-issue (Done-when items, Not in scope, links), any plan doc and any design reference. Use a code-graph/MCP index if the repo provides one; otherwise Grep/Glob. Delegate wide sweeps to an Explore agent.
-3. Confirm the environment: a database for tests (native, never Docker unless the repo requires it), a browser for e2e, network access. Find out how each agent gets its **own** database and port.
-4. Create or check out the feature branch (the session's designated branch if one is given). Make sure it is pushed.
-
-## Step 2: Plan waves and lanes
-
-- A **lane** is one issue (or a tight group) that one implementer owns end to end, with its files. A **wave** is a set of lanes that can run at the same time.
-- Two lanes that edit the same files never run in the same wave; order them by dependency (schema and server before UI, shared primitives before screens that use them). Docs-only and test-only lanes can ride along.
-- Size: three to five lanes per wave. Review each wave before the next starts.
-- **Tag each lane's risk.** `high` when it touches data integrity (writes that can overwrite or lose data, drafts, merges of concurrent edits), security (authentication, authorization, permissions, secrets, input validation at a trust boundary), schema or migrations, money, or concurrency (locks, transactions, races, realtime ordering); `normal` otherwise. When unsure, `high`. The tag decides the lane review in Step 3.
-- Write the plan into `RUN.md` (waves, lanes, risk, owned files, per-lane DB name and port) and into the task list (`TaskCreate`, one task per wave plus "Final gate" and "Deliver").
-- Write `BRIEF.md` from [references/brief-template.md](references/brief-template.md), filled with this repo's facts. Every implementer reads it first.
+- A **lane** is one issue (or a tight group) that one implementer owns end to end, with named files. A **wave** is 3–5 lanes with disjoint files. Order by dependency: schema and server before UI, shared primitives before the screens that use them. Docs-only and test-only lanes ride along.
+- Put the waves, lanes, owned files, and DB and port per lane in `RUN.md`. Create one task per wave, plus "Final gate" and "Deliver".
+- Write `BRIEF.md` from the [template](references/brief-template.md). It is the distilled repo profile that agents read instead of the steering docs.
 
 ## Step 3: Run a wave
 
 For each lane:
-1. **Create the lane's worktree yourself from the feature branch**: `git worktree add -b lane-<id> <repo>/.claude/worktrees/lane-<id> <feature-branch>`. Do not rely on the Agent tool's `isolation: "worktree"`, which branches from the default branch, not your feature branch. Copy any untracked local test config the brief needs into it.
-2. Launch the implementer **in the background**: `Agent` with `subagent_type: "goal-orchestrator:implementer"`, plus the `model` and `effort` from `RUN.md`, `run_in_background: true`, and a prompt that names: the worktree path (work only there), `BRIEF.md`, the issue(s) with their Done-when items, the owned files and the files to avoid, the DB name and port, the e2e filter to run at the end, and the report format.
-3. While lanes run, do not duplicate their work. Prepare the next wave's briefs, or answer what comes back.
+1. `git worktree add -b lane-<id> <repo>/.claude/worktrees/lane-<id> <feature-branch>`. Don't use `isolation: "worktree"`: it branches from the default branch. Copy in any untracked local test config the lane needs.
+2. Launch `Agent` with `subagent_type: "goal-orchestrator:implementer"`, `model` and `effort` from `RUN.md`, and `run_in_background: true`. The prompt holds only: the worktree path, the `BRIEF.md` path, the issue(s) and Done-when items, owned files and files to avoid, the DB and port, and the e2e filter. The agent definition carries its rules and report format.
+3. While lanes run, prepare the next wave. Don't duplicate their work.
 
-When a lane reports, it passes the **review ladder** before it merges. Each rung is cheaper than the one after it, so most problems are caught where they cost least:
-
-1. **Lane gate (every lane, no agent).** In the lane's worktree, re-run yourself the commands its report lists (typecheck, lint, its focused tests, its e2e filter) and compare exit codes and counts with what it claimed. Read the diff (`git diff <feature-branch>...lane-<id> --stat`, then the files) against each Done-when item, the owned-files list and the invariants in `BRIEF.md`. A claim that does not reproduce, a missing Done-when item, a file outside its ownership or a broken invariant goes back to the **same** agent (`SendMessage`) with the exact gap and output. Record the gate result per lane in `RUN.md`.
-2. **Lane review (high-risk lanes only).** After the gate passes, launch `goal-orchestrator:reviewer` (model and effort from `RUN.md`) on that lane alone, in a fresh worktree on `lane-<id>`, with the lane review brief in [references/review-brief.md](references/review-brief.md). Must-fix findings go back to the same implementer; merge only when the reviewer's must-fix list is empty or each item is fixed and re-gated.
-3. Wave review and final review follow in Step 4 and Step 5.
-
-Then:
-- Merge: `git merge --no-ff lane-<id> -m "Merge <ISSUE>: <summary>"` plus the repo's attribution trailers. Resolve conflicts by hand: per hunk, keep both sides' intent; for docs where both lanes edited the same paragraph, merge the sentences. Enable `git rerere`.
-- After every merge, run the fast checks yourself (typecheck, lint, unused code, the focused tests of the merged area). Stage **every** file you touched while resolving before you commit (`git status --short` must be empty after the commit). Push.
+When a lane reports:
+- Save the report to `reports/lane-<id>.md` and keep one verdict line in context.
+- Spot-check one claim by re-running one command.
+- Send gaps back to the same agent (`SendMessage`) with the exact gap. After 2 retries, re-plan or drop the lane (see Stop conditions).
+- Merge: `git merge --no-ff lane-<id> -m "Merge <ISSUE>: <summary>"` plus attribution trailers. Resolve conflicts per hunk, keeping both sides' intent.
+- Run the fast checks on the merged area. Stage everything you touched (`git status --short` is empty after the commit), then push.
 
 ## Step 4: Review the wave
 
-Every lane of the wave has passed its gate (and, if high-risk, its lane review) and is merged. The wave review looks for what single-lane checks cannot see: lanes that clash (two changes to the same flow, a contract one lane changed and another still uses), and the wave's diff as a whole against its issues.
+Skip docs-only and test-only waves. Otherwise launch `goal-orchestrator:reviewer` (model and effort from `RUN.md`) in a fresh worktree on the feature head, with the wave prompt from [review prompts](references/review-brief.md). For UI work, also launch one `goal-orchestrator:ui-auditor` per area (lists, dialogs and drawers, motion), each with its own DB and port.
 
-When a wave is merged, launch the reviewer (`subagent_type: "goal-orchestrator:reviewer"`, model and effort from `RUN.md`), working in a fresh worktree you create from the feature branch's head, with [references/review-brief.md](references/review-brief.md) (wave review). For UI work, also launch `goal-orchestrator:ui-auditor` per area (list screens, dialogs and drawers, motion), each with its own DB and port, comparing real screenshots with the design reference.
-
-Reviewers return findings as text (sub-agents cannot write report files): save each report to the scratchpad yourself. Then:
-- Turn findings into fix lanes (implementers), grouped by files, with the evidence paths.
-- Findings that are not worth their code: record why in `DECISIONS.md`. Security findings are never dropped silently: fix them, or put them to the user (around mode) or log them prominently (away mode).
-- Re-review only the fixed areas if the fixes were large.
-
-Repeat Steps 3 and 4 until every wave is merged and reviewed.
+Save the findings to `reports/`. Turn must-fix and should-fix findings into fix lanes grouped by file. For each finding you drop, log the reason in `DECISIONS.md`. Security findings are never dropped: fix them, ask (around), or log them prominently (away). Re-review only the areas a large fix touched.
 
 ## Step 5: Final gate
 
-On the feature branch's head, run everything yourself (background the long ones) and record exact results in `RUN.md`:
-- typecheck (app and tests), lint (zero warnings if the repo requires it), unused-code check,
-- the **full** unit and integration suites (with the repo's real database),
-- schema verification, if any,
-- the **full** e2e suite with the flags the goal needs.
+If the base moved, merge it in first; prefer that to rebasing. On the feature head, run everything (background long runs) and record exact results in `RUN.md`:
+- typecheck for app and tests, lint, unused code;
+- the full unit and integration suites with the real DB;
+- schema verification;
+- the full e2e suite.
 
-Then launch one **whole-diff final review** (reviewer, from a fresh worktree). For any goal that changes UI, also launch `goal-orchestrator:ui-auditor` per area (screens, dialogs and drawers, motion) against the design reference: this visual and motion audit is **required before the PR opens**, not optional; tests passing does not mean the screens match the reference. Fix what they find (Step 3, through the same ladder), and re-run the gate on the new head. A flaky test is never "flake": root-cause it (product bug or test bug) and fix it, proven by repeats (`--repeat-each=10`) and one run inside the full suite.
+Then run one whole-diff review, plus a visual re-check for UI goals. Fix what it finds, then re-run the gate. A flaky test is root-caused (product bug or test bug; note failures near midnight UTC), and the fix is proven with about 10 repeats plus one full-suite run.
 
 ## Step 6: Deliver
 
-Follow [references/delivery.md](references/delivery.md):
-1. **PR** (if the finish line includes it): title per the goal or `<summary> (<ISSUE>)`; body with Issues, Decisions, Migrations, Ops notes, Tests (exact commands and counts); the repo's PR template if one exists. Subscribe to PR activity.
-2. **Drive the PR to green**: on a CI failure, root-cause it; if it is not this PR's (an infra error the diff does not touch), comment once on the PR with the evidence and re-run once. Never skip or weaken a test.
-3. **Merge** only if the finish line says so and CI is green and the PR is mergeable; use the repo's merge method (merge commit by default).
-4. **Tracker**: tick each Done-when item that is met and verified, post the checkpoint in the repo's format (lint it if the repo has a linter), set states (Done only when every box is ticked and merged, or as the repo says).
-5. **Final results**: run the `report` skill's format for whatever the user chose at intake.
-6. Clean up: remove lane worktrees, unsubscribe from the PR once merged, cancel check-ins, and tell the user once that check-ins have stopped. State in your last message that each part of the goal's condition is met, with its evidence (merge SHA, CI run, checkpoint links, report link), so the goal evaluator can see it.
+Follow [delivery](references/delivery.md):
+1. Open the PR (if the finish line includes it).
+2. Drive CI to green, then merge if the finish line says so.
+3. Update the tracker.
+4. Produce the final results with the [report](../report/SKILL.md) skill.
+5. Clean up: remove worktrees, unsubscribe after the merge, cancel check-ins.
+6. Call `run_finish` last.
+
+## Stop conditions
+
+Every run ends in exactly one terminal state, through `run_finish`:
+- `DONE`: every issue shipped and verified at the chosen finish line.
+- `PARTIAL`: some issues shipped. A draft PR (or the pushed branch) lists what didn't ship and why.
+- `BLOCKED`: only the user can unblock it (auth, a secret or service, a refused permission, a merge that needs approval or is blocked by branch protection), or the run can't progress.
+
+Finish as `BLOCKED` or `PARTIAL` instead of retrying when:
+- the same check fails the same way twice after a fix;
+- a lane fails 2 retries (re-plan it once, then drop it → `PARTIAL`);
+- the watchdog says to wrap up.
+
+Before `run_finish`, in order: push, update `RUN.md`, `DECISIONS.md` and the PR or draft PR, remove the worktrees, cancel check-ins. After `run_finish`, make no more tool calls, and end the reply with the `GOAL: …` line it returns. In away mode a block is not a question: finish, and the user reads the line when they're back.
+
+The plugin's mod enforces this:
+- **Progress** is a new commit on the feature branch or an agent report.
+- **Wrap-up** starts after no progress: 60 orchestrator tool calls, the same command failing 3 times, the 8 h budget, or 45 quiet minutes twice. The mod then refuses new agents.
+- **Hard stop as `BLOCKED`** if `run_finish` doesn't come within 15 more calls.
+- **Every terminal state clears `/goal`.** The user can end a run with `/orchestrator-stop`.
+
+If `run_start` doesn't exist (Claude Code before v2.1.287, or mods off), apply these rules yourself and end with `GOAL: DONE|PARTIAL|BLOCKED — <summary>`.
 
 ## Progress
 
-When the user asks for progress at any point, answer in the `status` skill's format: an icon legend, then grouped one-line items, then ⚠️ lines for what needs them. No prose.
+When the user asks for progress or status, answer in the [status](../status/SKILL.md) format.

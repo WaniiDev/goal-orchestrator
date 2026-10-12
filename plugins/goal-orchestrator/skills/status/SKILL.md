@@ -1,38 +1,23 @@
 ---
 name: status
-description: Report an orchestrated goal's progress as a compact icon list (legend, grouped one-line items, key numbers, ⚠️ lines for anything needing the user). Use when the user asks for progress, status or "where are we" during a goal-orchestrator run.
-when_to_use: The user asks "progress", "status", "where are we" while a goal-orchestrator run is going, or runs /goal-orchestrator:status.
+description: Show a goal-orchestrator run's progress as a compact icon list.
+disable-model-invocation: true
 ---
 
-Answer from what you know: `RUN.md`, the task list, the agents you launched, merges, checks and the PR. Never guess an agent's result: one still running is 🔄.
-
-Format (no prose, no preamble):
+Answer from `RUN.md`, the task list, the agents you launched, the merges, the checks and the PR. An agent still running is 🔄; never guess its result. No prose, no preamble.
 
 ```
-✅ done · 🔄 running · ⏳ waiting · ❌ failed
+✅ done · 🔄 running · ⏳ waiting · ❌ failed · ⚠️ needs you
 
-**Issues** (or **Waves**)
-- ✅ <ID> <a few words on what it is>
-- 🔄 <ID> <a few words>
-
+**Waves** (or **Issues**)
+- ✅ <ID> <a few words>
 **Reviews**
-- ✅ <ID> lane gate: claims reproduced (<n> pass)
-- 🔄 <ID> lane review (high-risk: <why>)
-- ✅ Wave 1 review: <n> findings, all fixed
-- ⏳ Final review + UI audit
-
+- ✅ Wave 1: <n> findings, all fixed
 **Checks**
-- ✅ typecheck, lint, unused code
 - ✅ unit + integration: <pass> pass, <fail> fail
-- 🔄 full e2e
-
-**Tracker**
-- ⏳ <ID> checkpoint after the gate
-
 **PR**
-- ⏳ not opened yet   (or ✅ #<n> green, mergeable)
+- ⏳ not opened   (or ✅ #<n> green, mergeable)
 
 ⚠️ <one line per thing the user must act on>
 ```
-
-Rules: one line per item; key numbers only (test counts, pass/fail, timings when they matter); group under short bold headings that fit the run; leave out empty groups; end with ⚠️ lines only when something needs the user.
+One line per item; key numbers only; leave out empty groups; ⚠️ lines only when something needs the user.
