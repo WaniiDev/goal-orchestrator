@@ -114,7 +114,7 @@ function clearGoal($: $): void {
 function wrapUpNotice(current: Run): string {
   return [
     `goal-orchestrator watchdog: ${current.reason}.`,
-    'Stop starting new work. Push the branch, save state (RUN.md, DECISIONS.md, draft PR),',
+    'Stop starting new work, and stop a running ship workflow with TaskStop. Push the branch, save state (RUN.md, DECISIONS.md, draft PR),',
     `remove lane worktrees, then call run_finish with PARTIAL or BLOCKED. ${current.graceLeft} tool calls left before a hard stop.`,
   ].join(' ')
 }
@@ -148,7 +148,7 @@ async function tick($: $): Promise<void> {
   await save($)
   await $.prompt
     .submit({
-      text: `goal-orchestrator watchdog: no tool call and no agent report for ${run.limits.maxQuietMinutes} min. Check the running agents (ListAgents); relaunch or drop a hung lane, or call run_finish if the run cannot continue.`,
+      text: `goal-orchestrator watchdog: no tool call and no agent report for ${run.limits.maxQuietMinutes} min. Check the ship workflow and any running agents; relaunch or drop what hangs, or call run_finish if the run cannot continue.`,
     })
     .catch(() => undefined)
 }
@@ -296,7 +296,7 @@ export const register: Register = on => {
     }
 
     if (current.phase === 'wrapup') {
-      if (e.tool === 'Agent') return { deny: `No new agents: ${current.reason}. Wrap up and call run_finish.` }
+      if (e.tool === 'Agent' || e.tool === 'Workflow') return { deny: `No new agents or workflows: ${current.reason}. Wrap up and call run_finish.` }
       current.graceLeft -= 1
       if (current.graceLeft <= 0) {
         end($, current, 'stopped', 'BLOCKED', `watchdog: ${current.reason}, and run_finish was not called`)

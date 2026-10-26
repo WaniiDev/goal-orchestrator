@@ -4,7 +4,7 @@ description: Produce a finished goal-orchestrator run's final results in the for
 disable-model-invocation: true
 ---
 
-Read `RUN.md` (the `results:` line), `DECISIONS.md`, the gate results and the PR. Produce only the forms chosen there. `pr-body` and `tracker` follow the run skill's `references/delivery.md`.
+Read `RUN.md` (the `results:` line), `DECISIONS.md`, `reports/ship.json` (the workflow's result) and the PR. Produce only the forms chosen there. `pr-body` and `tracker` follow the run skill's `references/delivery.md`.
 
 **chat**: lead with one line on the outcome (merged as `<sha>` / PR #<n> green, waiting for you / branch pushed / the `GOAL:` line). Then:
 ```

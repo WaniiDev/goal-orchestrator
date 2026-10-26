@@ -90,6 +90,7 @@ describe('goal-orchestrator watchdog', () => {
     expect(tripped.context?.join(' ')).toMatch(/watchdog: "bun test" failed 2 times/)
 
     expect((await $.tool.call({ tool: 'Agent', prompt: 'x', description: 'x' } as never)).deny).toMatch(/No new agents/)
+    expect((await $.tool.call({ tool: 'Workflow', name: 'goal-orchestrator:ship' } as never)).deny).toMatch(/No new agents or workflows/)
     let last = await bash($, 'git status')
     for (let i = 0; i < 20 && last.deny === undefined; i++) last = await bash($, 'git status')
     expect(last.deny).toMatch(/Hard stop\. GOAL: BLOCKED/)

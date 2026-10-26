@@ -24,6 +24,6 @@ results: chat, pr-body[, tracker][, page]
 branch: <feature branch>
 started: <ISO time>
 ```
-These answers are the user's explicit choice of models and efforts: pass them as `model` and `effort` on every `Agent` call.
+These answers are the user's explicit choice of models and efforts: they go into the plan's `models` (without workflows: `model` and `effort` on every `Agent` call).
 
 **Skip the question** with `--auto`, or when the goal already answers it. Then use the stated values, or these defaults: implementer `sonnet · medium`, reviewer `opus · xhigh`, mode `away`, finish `pr` (never merge without an explicit yes). Say in one line which values you used.

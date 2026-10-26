@@ -11,6 +11,7 @@ Mode: <away: never ask; decide by issue > plan > design > repo docs/ADRs > small
 - Install: `<cmd>`
 - DB: set `<DATABASE_URL vars>` to the DB your task names (it ends in `_test`); prepare it with `<cmd>`.
 - Port: `<PORT var>` = the port your task names. Browser: <notes>. Local config to copy and never commit: <files>.
+- Main checkout (merges and the final gate): DB `<db>`, port `<port>`.
 
 ## Checks (all of them before you finish)
 - `<typecheck>` · `<typecheck tests>` · `<lint>` · `<unused-code>`

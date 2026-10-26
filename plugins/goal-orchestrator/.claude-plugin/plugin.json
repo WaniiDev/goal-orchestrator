@@ -1,8 +1,8 @@
 {
   "name": "goal-orchestrator",
-  "version": "1.3.0",
-  "description": "Ship a goal (an issue and its sub-issues) as one PR on one branch: intake asks which models and effort to use and whether you will be away, then implementer sub-agents work in waves in their own worktrees, reviewer sub-agents check every wave, a final gate and whole-diff review run, and you get the PR, tracker updates and a final report. A built-in watchdog ends the run as DONE, PARTIAL or BLOCKED instead of looping.",
+  "version": "2.0.0",
+  "description": "Ship a goal (an issue and its sub-issues) as one PR on one branch: intake asks which models and effort to use and whether you will be away, then a ship workflow runs the build as code: contract tests first, implementer sub-agents in waves in their own worktrees, every claim re-run, reviews per wave, a final gate and a whole-diff review. You get the PR, tracker updates and a final report. A built-in watchdog ends the run as DONE, PARTIAL or BLOCKED instead of looping.",
   "author": { "name": "WaniiDev" },
-  "keywords": ["orchestration", "subagents", "worktrees", "pull-requests", "review", "linear"],
+  "keywords": ["orchestration", "subagents", "workflows", "worktrees", "pull-requests", "review", "linear"],
   "types": "./types/index.d.ts"
 }

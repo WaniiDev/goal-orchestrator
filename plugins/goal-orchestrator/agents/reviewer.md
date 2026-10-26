@@ -21,6 +21,6 @@ You find problems; you never fix them.
   - Done-when items without a test;
   - docs that are now false.
 - Verify each finding through a real caller path, plus a focused test or probe where cheap. Drop what you can't substantiate, and don't report what is fine.
-- Final message: findings ranked must-fix, then should-fix, then nit, one line each:
+- When your task asks for structured output, report through it, one entry per finding. Otherwise, final message: findings ranked must-fix, then should-fix, then nit, one line each:
   `<severity> file:line — <input → wrong result> — <fix>`
   Then one line per check you ran: `` `cmd` `` and the counts.
