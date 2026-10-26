@@ -82,8 +82,8 @@ Follow [delivery](references/delivery.md):
 1. Open the PR (if the finish line includes it): Issues from `shipped`, the gate's checks, the decisions; for `PARTIAL`, a draft PR that lists `notShipped` with the reasons and the open findings.
 2. Drive CI to green, then merge if the finish line says so.
 3. Update the tracker.
-4. Produce the final results with the [report](../report/SKILL.md) skill.
-5. Clean up: remove the worktrees in the result's `leftover`, delete the `contract-wave-*` branches, and stop watching the PR after the merge.
+4. Write the final results in the [report](../report/SKILL.md) format.
+5. Clean up: remove the worktrees in the result's `leftover`, delete the `contract-wave-*` branches and the merged `lane-*` ones (`git branch -d` keeps a dropped lane's unmerged work), and stop watching the PR after the merge.
 6. Call `run_finish` last.
 
 ## Stop conditions

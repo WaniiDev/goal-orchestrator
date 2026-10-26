@@ -199,6 +199,16 @@ test('fix lanes show under the round that made them, and a lane report must cove
   assert.ok(sha.test('411d9b3') && sha.test('') && !sha.test('see-below'))
 })
 
+test('heads and shas that go into git commands are bare hashes', async () => {
+  const { calls } = await ship(plan())
+  const pattern = (label, field) => new RegExp(calls.find(call => call.label === label).schema.properties[field].pattern)
+  for (const head of [pattern('wave 1 merge', 'head'), pattern('gate 1', 'head')]) {
+    assert.ok(head.test('179c659') && !head.test('179c659 (feat/block-drop)') && !head.test(''))
+  }
+  const contract = pattern('wave 1 contract', 'sha')
+  assert.ok(contract.test('520172b') && contract.test('') && !contract.test('commit 520172b'))
+})
+
 test('a claim that does not re-run gets a fix attempt with the exact gap', async () => {
   const { result, prompt } = await ship(plan(), {
     'board check': (_, nth) =>
@@ -221,6 +231,27 @@ test('edited contract tests and edits to another lane\'s files block the merge',
   assert.match(prompt('board fix 1'), /contract tests were edited/)
   assert.match(prompt('board fix 1'), /edited src\/input\.ts, which lane input owns/)
   assert.doesNotMatch(prompt('board fix 1'), /README/)
+})
+
+test('re-checks go by exit codes and counts, not by whether git prints anything', async () => {
+  const check = (await ship(plan())).prompt('board check')
+  assert.match(check, /contractUntouched: git diff --quiet contract-sha HEAD -- tests\/board\.test\.ts exits 0/)
+  assert.match(check, /clean: git status --porcelain \| wc -l prints 0/)
+  assert.doesNotMatch(check, /prints nothing/)
+})
+
+test('an edit inside a directory another lane owns blocks the merge', async () => {
+  const waves = structuredClone(PLAN.waves)
+  waves[0].lanes[0].owns = ['src/board/']
+  waves[0].lanes[1].owns = ['src/input']
+  const outsideFiles = ['src/input/keys.ts', 'src\\input\\map.ts', 'src/inputs.ts']
+  const { prompt } = await ship(plan({ waves }), {
+    'board check': (_, nth) =>
+      nth === 1 ? { checks: [{ ...OK, matchesReport: true }], contractUntouched: true, clean: true, outsideFiles } : standard('board check'),
+  })
+  assert.match(prompt('board fix 1'), /edited src\/input\/keys\.ts, which lane input owns/)
+  assert.match(prompt('board fix 1'), /edited src\\input\\map\.ts, which lane input owns/)
+  assert.doesNotMatch(prompt('board fix 1'), /src\/inputs\.ts/)
 })
 
 test('a lane that keeps failing is dropped after its retries and the run is PARTIAL', async () => {

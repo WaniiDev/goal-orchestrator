@@ -43,7 +43,7 @@ After the intake, the run arms `/goal` itself (`start_goal`), so it keeps going 
 
 Headless (`claude -p`): set `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`. Otherwise print mode stops background work 10 minutes after the last turn, which cuts the ship workflow off mid-run.
 
-`--auto` skips the intake and uses the defaults: Sonnet · medium to build, Opus · xhigh to review, away mode, PR only (never merges without your yes). Results: the chat summary, the PR body, and tracker checkpoints when a tracker connector exists.
+`--auto` skips the intake and uses the defaults: Sonnet · medium to build, Opus · xhigh to review, away mode, PR only (branch only when origin is missing or a local path; never merges without your yes). Results: the chat summary, the PR body, and tracker checkpoints when a tracker connector exists.
 
 ## Contents
 

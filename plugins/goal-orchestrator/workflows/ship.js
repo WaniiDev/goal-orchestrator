@@ -23,6 +23,9 @@ const TYPE = {
 }
 const MAX_FIX_LANES = 4
 const RESERVE = 50_000
+// A commit hash and nothing else: these values go straight into git commands and ranges.
+const SHA = '^[0-9a-f]{7,40}$'
+const SHA_OR_EMPTY = '^([0-9a-f]{7,40})?$'
 
 const CHECK = {
   type: 'object',
@@ -36,7 +39,7 @@ const LANE = {
     status: { type: 'string', enum: ['done', 'partial', 'blocked'] },
     sha: {
       type: 'string',
-      pattern: '^([0-9a-f]{7,40})?$',
+      pattern: SHA_OR_EMPTY,
       description: 'your last commit on the lane branch, made before this report (empty only if blocked before any commit)',
     },
     files: { type: 'array', items: { type: 'string' } },
@@ -85,7 +88,7 @@ const CONTRACT = {
   type: 'object',
   required: ['sha', 'lanes'],
   properties: {
-    sha: { type: 'string', description: 'the commit that adds the contract tests' },
+    sha: { type: 'string', pattern: SHA_OR_EMPTY, description: 'the commit that adds the contract tests (empty if no item can be tested)' },
     lanes: {
       type: 'array',
       items: {
@@ -126,7 +129,7 @@ const MERGE = {
   type: 'object',
   required: ['head', 'merged', 'failed', 'checks'],
   properties: {
-    head: { type: 'string' },
+    head: { type: 'string', pattern: SHA, description: 'the feature branch head after the merges' },
     merged: { type: 'array', items: { type: 'string' }, description: 'the lanes now merged, by the id before each colon' },
     failed: {
       type: 'array',
@@ -139,7 +142,7 @@ const GATE = {
   type: 'object',
   required: ['head', 'checks', 'failures'],
   properties: {
-    head: { type: 'string' },
+    head: { type: 'string', pattern: SHA, description: 'the commit the gate ran on' },
     checks: { type: 'array', items: CHECK },
     failures: {
       type: 'array',
@@ -173,6 +176,12 @@ const describe = f =>
   `${f.severity}${f.security ? ' (security)' : ''} ${f.file}${f.line ? `:${f.line}` : ''} — ${f.problem} — fix: ${f.fix}`
 const budgetLow = () => typeof budget !== 'undefined' && budget.total && budget.remaining() < RESERVE
 const untestableOf = (contract, id) => ((contract.lanes || []).find(entry => entry.id === id) || {}).untestable || []
+// owns lists files or directories; paths compare repo-relative, with forward slashes.
+const normal = path => path.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '')
+const ownsFile = (lane, file) => {
+  const path = normal(file)
+  return lane.owns.map(normal).some(entry => path === entry || path.startsWith(`${entry}/`))
+}
 
 // An agent call that throws (a spent token budget does) counts as no answer and
 // stops the run, so the workflow still returns what it has.
@@ -220,9 +229,9 @@ function checkPrompt(lane, tree, tests, contract, report) {
       (report.checks || []).map(c => `${c.cmd} → ${c.pass ? 'pass' : 'fail'}, ${c.counts}`),
     )}`,
     tests && tests.files.length
-      ? `contractUntouched: git diff --stat ${contract.sha} HEAD -- ${tests.files.join(' ')} prints nothing.`
+      ? `contractUntouched: git diff --quiet ${contract.sha} HEAD -- ${tests.files.join(' ')} exits 0.`
       : 'contractUntouched: true (this lane has no contract).',
-    `clean: git status --short prints nothing. outsideFiles: files in git diff --name-only ${plan.branch}...HEAD outside ${lane.owns.join(', ')}.`,
+    `clean: git status --porcelain | wc -l prints 0. outsideFiles: files in git diff --name-only ${plan.branch}...HEAD outside ${lane.owns.join(', ')}.`,
   ].join('\n')
 }
 
@@ -248,7 +257,7 @@ function laneGaps(lane, wave, report, check) {
     if (!check.contractUntouched) gaps.push('contract tests were edited: restore them and make the code pass them')
     if (!check.clean) gaps.push('the worktree has uncommitted changes')
     for (const file of check.outsideFiles || []) {
-      const owner = wave.lanes.find(other => other.id !== lane.id && other.owns.includes(file))
+      const owner = wave.lanes.find(other => other.id !== lane.id && ownsFile(other, file))
       if (owner) gaps.push(`edited ${file}, which lane ${owner.id} owns`)
     }
   }

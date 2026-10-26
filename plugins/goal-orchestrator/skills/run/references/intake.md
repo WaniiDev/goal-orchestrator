@@ -1,6 +1,6 @@
 # Intake
 
-Ask with **one** `AskUserQuestion` call before any other tool call. Put the recommended option first. The user can always type "Other" (for example `opus · max` or a full model ID).
+Ask with **one** `AskUserQuestion` call. Before it, only read this file and run `git remote get-url origin` (for question 4). Put the recommended option first. The user can always type "Other" (for example `opus · max` or a full model ID).
 
 1. header `Build with`: "Which model and effort should the implementer agents use?"
    `Sonnet · medium (Recommended)` (well-specified issues) · `Opus · high` (hard refactors, data integrity, concurrency) · `Fable · medium` · `Haiku · low` (only renames, copy, docs)
@@ -10,6 +10,7 @@ Ask with **one** `AskUserQuestion` call before any other tool call. Put the reco
    `Away / asleep (Recommended for long goals)`: no questions after this; decisions go in the PR · `Around`: asked only about what changes what gets built
 4. header `Finish`: "How far should I take it?"
    `PR, merge when green (Recommended)` · `PR, I merge` · `Branch only`
+   No PR host (no origin, or origin is a local path or a `file://` URL): recommend `Branch only` instead, and say in each PR option that it ends `BLOCKED` here.
 
 The final results default to the chat summary, the PR body and tracker checkpoints (only when a tracker connector exists). Add the shareable report page only if the goal asks for one.
 
@@ -26,4 +27,4 @@ started: <ISO time>
 ```
 These answers are the user's explicit choice of models and efforts: they go into the plan's `models` (without workflows: `model` and `effort` on every `Agent` call).
 
-**Skip the question** with `--auto`, or when the goal already answers it. Then use the stated values, or these defaults: implementer `sonnet · medium`, reviewer `opus · xhigh`, mode `away`, finish `pr` (never merge without an explicit yes). Say in one line which values you used.
+**Skip the question** with `--auto`, or when the goal already answers it. Then use the stated values, or these defaults: implementer `sonnet · medium`, reviewer `opus · xhigh`, mode `away`, finish `pr` (`branch` with no PR host; never merge without an explicit yes). Say in one line which values you used.
