@@ -4,7 +4,7 @@ A Claude Code plugin that ships a goal (an issue and its sub-issues, a plan doc,
 
 ## What it does
 
-1. **Intake.** One question set: which model and effort the implementers and reviewers use, whether you'll be away (fully autonomous) or around, and how far to go (branch, PR, or PR and merge when green).
+1. **Intake.** One question set: which model and effort the implementers and reviewers use, whether you'll be away (fully autonomous) or around, and how far to go (branch, PR, or PR and merge when green). Then the run arms `/goal` itself, so it can't lose its finish line.
 2. **Recon and plan.** Reads the repo's steering docs and every issue, then plans waves of lanes that never edit the same files at the same time.
 3. **Ship (a workflow).** The build runs as a dynamic workflow: a program, not a prompt, so retries, gates and stop rules run as code. For each wave:
    - **Contract first.** An agent turns the Done-when items into failing acceptance tests before any feature code exists.
@@ -37,17 +37,9 @@ To update: `claude plugin update goal-orchestrator@goal-orchestrator-marketplace
 /goal-orchestrator:report
 ```
 
-Watch the ship phase live with `/workflows`.
+Or ask in plain words ("ship WAN-346 and its sub-issues as one PR while I sleep"). Claude can start the run skill itself, so another session, or a `/goal` that names goal-orchestrator, can start a run too.
 
-For an unattended run, pair it with `/goal` so it keeps going until a terminal state, and never past one:
-
-```
-/goal The orchestrator's latest reply ends with a line starting "GOAL: DONE", "GOAL: PARTIAL" or "GOAL: BLOCKED", or with "Waiting for the ship workflow.". Any of these means the condition is met. Also met after 80 turns.
-```
-
-The workflow's result wakes the session by itself, so `/goal` needn't keep it awake while the workflow runs.
-
-`/orchestrator-stop` ends a run by hand (as `BLOCKED`) and clears `/goal`.
+After the intake, the run arms `/goal` itself (`start_goal`), so it keeps going until a terminal state and never past one: goal mode waits while the ship workflow runs, and every terminal state clears it. Watch the ship phase live with `/workflows`. `/orchestrator-stop` ends a run by hand (as `BLOCKED`) and clears `/goal`.
 
 `--auto` skips the intake and uses the defaults: Sonnet · medium to build, Opus · xhigh to review, away mode, PR only (never merges without your yes). Results: the chat summary, the PR body, and tracker checkpoints when a tracker connector exists.
 
@@ -56,7 +48,7 @@ The workflow's result wakes the session by itself, so `/goal` needn't keep it aw
 - `skills/run/`: the method (`SKILL.md`) and its references, each read only at its step: intake, the brief template, delivery, and the manual waves for sessions without workflows (with their review prompts).
 - `workflows/ship.js`: the ship phase. Its input is the plan the run skill writes; it returns the outcome, what shipped and what didn't (and why), the gate's checks, open findings and decisions.
 - `skills/status/`, `skills/report/`: the progress and final-results formats. Only you invoke them, so they add nothing to a session's context until used.
-- `hooks/register.ts` (a Claude Code mod, v2.1.287+): `run_start` / `run_finish` tools, a progress and budget watchdog (no new commit, repeated failures, time, quiet runs), `/orchestrator-stop`, `/goal clear` on every terminal state, and guards against `pkill`/`killall`, force push and `--no-verify` while a run is active.
+- `hooks/register.ts` (a Claude Code mod, v2.1.287+): `start_goal` (arms `/goal` after the intake and keeps the finish line in the system prompt), `run_start` / `run_finish` tools, a progress and budget watchdog (no new commit, repeated failures, time, quiet runs), `/orchestrator-stop`, `/goal clear` on every terminal state, and guards against `pkill`/`killall`, force push and `--no-verify` while a run is active.
 - `agents/implementer.md` (default Sonnet · medium), `agents/reviewer.md` and `agents/ui-auditor.md` (default Opus · xhigh), `agents/integrator.md` (Sonnet · low: re-checks, merges, the gate). Each carries its own rules, so prompts carry only the lane's facts. The intake's choices override the models per run.
 - Tests: `claude plugin test plugins/goal-orchestrator` (the mod) and `node --test plugins/goal-orchestrator/tests/ship.test.mjs` (the workflow's control flow, with every agent faked).
 

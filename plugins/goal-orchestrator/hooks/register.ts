@@ -1,17 +1,24 @@
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { Limits, Outcome, Run } from '../types'
+import type { ActiveGoal, Limits, Outcome, Run } from '../types'
 
-// Exit paths for a goal-orchestrator run, enforced in code instead of prose:
-// run_start / run_finish tools, a progress and budget watchdog, a quiet-run
-// wake-up, /orchestrator-stop, a /goal clear on every terminal state, and
-// command guards while a run is active.
+// Goal mode and exit paths for a goal-orchestrator run, enforced in code
+// instead of prose: start_goal (queues /goal and keeps its finish line in the
+// system prompt), run_start / run_finish tools, a progress and budget
+// watchdog, a quiet-run wake-up, /orchestrator-stop, a /goal clear on every
+// terminal state, and command guards while a run is active.
 
 type $ = EngineInterface
 
 const RUN = { plugin: 'goal-orchestrator', key: 'run' } as const
+const GOAL = { plugin: 'goal-orchestrator', key: 'goal' } as const
 const START = 'mcp__goal-orchestrator__run_start'
 const FINISH = 'mcp__goal-orchestrator__run_finish'
+const START_GOAL = 'mcp__goal-orchestrator__start_goal'
+/** `/goal`'s own limit on a condition. */
+const MAX_CONDITION = 4000
+/** `/goal clear` and its aliases. */
+const CLEARS = new Set(['clear', 'stop', 'off', 'reset', 'none', 'cancel'])
 // The desktop app's end-of-turn tools (task list, wrap-up box): bookkeeping, not work.
 const TURN_TOOLS = 'mcp__ccd_turn__'
 const OUTCOMES: readonly Outcome[] = ['DONE', 'PARTIAL', 'BLOCKED']
@@ -104,6 +111,7 @@ function end($: $, current: Run, phase: 'ended' | 'stopped', outcome: Outcome, s
 // /goal only clears itself on met / impossible / fatal error, so every
 // terminal state clears it here, once the session is idle.
 function clearGoal($: $): void {
+  void $.state.set(GOAL, null)
   $.clock.after(0, () => {
     void $.command.run({ command: 'goal', args: 'clear' }).catch(error => {
       $.ui.log(`goal-orchestrator: could not run /goal clear (${String(error)}); run it yourself.`)
@@ -191,9 +199,34 @@ const finishSpec = {
   },
 }
 
+const startGoalSpec = {
+  name: 'start_goal',
+  description:
+    "Turn on Claude Code goal mode for a goal-orchestrator run: queues `/goal <condition>` exactly as if the user typed it. Call it once, right after the run skill's intake. The goal starts when this turn ends: say in one line that goal mode is armed, then end your turn.",
+  isDeferred: true,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      condition: { type: 'string', description: `The /goal completion condition, at most ${MAX_CONDITION} characters.` },
+      run_file: { type: 'string', description: "Absolute path of the run's RUN.md." },
+    },
+    required: ['condition'],
+  },
+}
+
+function finishLine(goal: ActiveGoal): string {
+  return [
+    'A goal-orchestrator run is active in this session, in goal mode.',
+    `Its finish line (the /goal condition): ${goal.condition}`,
+    `Its state is in ${goal.runFile || 'RUN.md in the scratchpad'}: re-read it before acting after a compaction or a resume, then continue the goal-orchestrator:run skill from the step it records.`,
+    'If `/goal` reports the goal achieved or cleared, this section no longer applies.',
+  ].join('\n')
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     run = (await $.state.get(RUN)).value ?? null
+    await $.tool.register(startGoalSpec)
     await $.tool.register(startSpec)
     await $.tool.register(finishSpec)
     await $.command.register({
@@ -214,6 +247,45 @@ export const register: Register = on => {
     status($, await $.clock.now())
     clearGoal($)
     return { text: 'Run stopped as BLOCKED. The next tool call is refused and /goal is cleared.' }
+  })
+
+  on('tool.call', { tool: START_GOAL }, async ($, e) => {
+    const input = e as unknown as Record<string, unknown>
+    const condition = typeof input.condition === 'string' ? input.condition.trim() : ''
+    if (condition === '') return { deny: 'start_goal needs a condition.' }
+    if (condition.length > MAX_CONDITION) {
+      return { deny: `The condition is ${condition.length} characters; /goal takes at most ${MAX_CONDITION}.` }
+    }
+    const runFile = typeof input.run_file === 'string' ? input.run_file.trim() : ''
+    const goal: ActiveGoal = { condition, runFile, setAt: await $.clock.now() }
+    await $.state.set(GOAL, goal)
+    // A slash command can't run inside the hook the turn is waiting on: queue it for when the session is idle.
+    $.clock.after(0, () => {
+      void $.command.run({ command: 'goal', args: condition }).catch(() => {
+        $.ui.toast('goal-orchestrator: /goal could not start. Type /goal and paste the condition from RUN.md.')
+      })
+    })
+    return {
+      result: `Goal mode is queued: /goal starts when this turn ends and keeps the run going until this condition is met:\n${condition}\nEnd your turn now.`,
+    }
+  }).catch(() => ({ deny: 'start_goal failed inside the goal-orchestrator mod; give the user the /goal line from RUN.md to paste.' }))
+
+  // `/goal clear`, or a /goal for something else, ends this run's hold on the finish line.
+  on('command.run', { command: 'goal' }, async ($, e, next) => {
+    const args = e.args.trim()
+    const goal = (await $.state.get(GOAL)).value ?? null
+    if (goal !== null && args !== '' && (CLEARS.has(args.toLowerCase()) || args !== goal.condition)) {
+      await $.state.set(GOAL, null)
+    }
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // Keeps the finish line in the system prompt, so it survives a compaction even if the conversation does not.
+  on('prompt.compose', async ($, e, next) => {
+    const composed = await next(e)
+    const goal = (await $.state.get(GOAL)).value ?? null
+    if (goal === null) return composed
+    return { ...composed, sections: [...composed.sections, { id: 'goal-orchestrator:finish-line', text: finishLine(goal), scope: 'session' }] }
   })
 
   on('tool.call', { tool: START }, async ($, e) => {
@@ -274,7 +346,9 @@ export const register: Register = on => {
 
   // Every other tool call: the guards, the terminal lock, and the watchdog.
   on('tool.call', async ($, e, next) => {
-    if (e.tool === START || e.tool === FINISH || String(e.tool).startsWith(TURN_TOOLS) || run === null) return next(e)
+    if (e.tool === START || e.tool === FINISH || e.tool === START_GOAL || String(e.tool).startsWith(TURN_TOOLS) || run === null) {
+      return next(e)
+    }
     const current = run
     const isMain = e.agentId === undefined
 

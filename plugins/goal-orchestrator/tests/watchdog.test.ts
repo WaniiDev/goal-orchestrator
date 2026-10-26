@@ -4,13 +4,17 @@ import type { On } from 'claude-code'
 
 const START = 'mcp__goal-orchestrator__run_start'
 const FINISH = 'mcp__goal-orchestrator__run_finish'
+const START_GOAL = 'mcp__goal-orchestrator__start_goal'
+const COMPOSE = { model: 'claude-sonnet-5-5', promptModel: 'claude-sonnet-5-5', surfaces: [], tools: [], outputStyle: null, traits: [] } as const
+const CONDITION = 'goal-orchestrator run for WAN-1. Met when the latest reply ends with a line starting "GOAL: DONE", "GOAL: PARTIAL" or "GOAL: BLOCKED".'
 
-type World = { heads: string[]; goalClears: number; prompts: string[]; toasts: string[]; failing: Set<string> }
+type World = { heads: string[]; goals: string[]; goalClears: number; prompts: string[]; toasts: string[]; failing: Set<string> }
 
 // The world beneath the plugin: git, the UI, /goal, prompts and the tools themselves.
 function world(on: On): World {
-  const w: World = { heads: ['aaa'], goalClears: 0, prompts: [], toasts: [], failing: new Set() }
+  const w: World = { heads: ['aaa'], goals: [], goalClears: 0, prompts: [], toasts: [], failing: new Set() }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('prompt.compose', () => ({ sections: [] }))
   on('turn.complete', ($, e) => ({ text: e.answer }))
   on('process.run', () => ({
     value: { exitCode: 0, stdout: `${w.heads[0]}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
@@ -24,9 +28,10 @@ function world(on: On): World {
   })
   on('tool.register', ($, e) => ({ value: { tool: e.name } }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
-  on('command.run', { command: 'goal' }, () => {
-    w.goalClears += 1
-    return { text: 'goal cleared' }
+  on('command.run', { command: 'goal' }, ($, e) => {
+    w.goals.push(e.args)
+    if (e.args === 'clear') w.goalClears += 1
+    return { text: '' }
   })
   on('prompt.submit', ($, e) => {
     w.prompts.push(e.text)
@@ -172,5 +177,55 @@ describe('goal-orchestrator watchdog', () => {
     expect((await bash($, 'ls')).deny).toMatch(/stopped by the user/)
     await clock.advance(1)
     expect(w.goalClears).toBe(1)
+  })
+})
+
+describe('goal-orchestrator goal mode', () => {
+  test('start_goal queues /goal with the condition once the turn is over', async ($, on) => {
+    const clock = mock.clock(on)
+    const w = world(on)
+    const called = await $.tool.call({ tool: START_GOAL, condition: CONDITION, run_file: '/state/RUN.md' } as never)
+    expect(called.deny).toBeUndefined()
+    expect(String(called.result)).toMatch(/End your turn now/)
+    expect(w.goals).toEqual([])
+    await clock.advance(1)
+    expect(w.goals).toEqual([CONDITION])
+  })
+
+  test('the finish line rides the system prompt until /goal is cleared', async ($, on) => {
+    const clock = mock.clock(on)
+    world(on)
+    expect((await $.prompt.compose(COMPOSE as never)).sections).toEqual([])
+    await $.tool.call({ tool: START_GOAL, condition: CONDITION, run_file: '/state/RUN.md' } as never)
+    await clock.advance(1)
+    const [section] = (await $.prompt.compose(COMPOSE as never)).sections
+    expect(section?.id).toBe('goal-orchestrator:finish-line')
+    expect(section?.text).toContain(CONDITION)
+    expect(section?.text).toContain('/state/RUN.md')
+    await $.command.run({ command: 'goal', args: 'clear' } as never)
+    expect((await $.prompt.compose(COMPOSE as never)).sections).toEqual([])
+  })
+
+  test('start_goal refuses an empty or oversized condition and queues nothing', async ($, on) => {
+    const clock = mock.clock(on)
+    const w = world(on)
+    expect((await $.tool.call({ tool: START_GOAL, condition: '  ' } as never)).deny).toMatch(/needs a condition/)
+    expect((await $.tool.call({ tool: START_GOAL, condition: 'x'.repeat(4001) } as never)).deny).toMatch(/at most 4000/)
+    await clock.advance(1)
+    expect(w.goals).toEqual([])
+    expect((await $.prompt.compose(COMPOSE as never)).sections).toEqual([])
+  })
+
+  test("the run's end clears the goal and drops the finish line", async ($, on) => {
+    const clock = mock.clock(on)
+    const w = world(on)
+    await $.tool.call({ tool: START_GOAL, condition: CONDITION, run_file: '/state/RUN.md' } as never)
+    await clock.advance(1)
+    await begin($)
+    await $.tool.call({ tool: FINISH, outcome: 'DONE', summary: 'branch pushed' } as never)
+    await mainTurnEnds($)
+    await clock.advance(1)
+    expect(w.goals).toEqual([CONDITION, 'clear'])
+    expect((await $.prompt.compose(COMPOSE as never)).sections).toEqual([])
   })
 })

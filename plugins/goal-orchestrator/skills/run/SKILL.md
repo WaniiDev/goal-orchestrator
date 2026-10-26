@@ -1,8 +1,8 @@
 ---
 name: run
-description: Ship a goal (a tracker issue and its sub-issues, a plan doc, or a written goal) as ONE pull request on ONE branch. You plan it; the ship workflow builds it in waves with contract tests first, re-checked claims, reviews and a final gate; you deliver it.
+description: Ship a goal (a tracker issue and its sub-issues, a plan doc, or a written goal) as ONE pull request on ONE branch. An intake asks which models, effort, mode and finish line to use; goal mode holds the finish line; the ship workflow builds it in waves with contract tests first, re-checked claims, reviews and a final gate; you deliver it.
+when_to_use: The user runs /goal-orchestrator:run, a /goal condition or prompt names goal-orchestrator, or the user asks to ship several issues or a multi-step goal with sub-agents "as one PR" or "while I sleep".
 argument-hint: "<goal: issue key(s), plan doc path, or a sentence> [--auto]"
-disable-model-invocation: true
 ---
 
 # Goal orchestrator
@@ -21,6 +21,21 @@ Follow [intake](references/intake.md).
 - **Away**: after intake, never ask or wait. Decide by issue text > plan doc > design reference > repo docs and ADRs > smallest safe option; log each decision.
 - **Around**: ask only about scope, architecture, data model or anything destructive; still log decisions.
 
+## Step 0b: Arm goal mode
+
+Right after the intake (`--auto` included), before recon, so the run can't lose its finish line. Goal mode re-checks the condition after every turn, waits while the workflow runs, and the mod clears it when the run ends.
+1. Write the condition into `RUN.md`, at most 4,000 characters, judged from the conversation alone: "goal-orchestrator run for <goal>, state in <RUN.md path>. Met when the orchestrator's latest reply ends with a line starting `GOAL: DONE`, `GOAL: PARTIAL` or `GOAL: BLOCKED`. Until then the run works toward: every issue's Done-when met, the final gate green, and <branch pushed | PR open with CI green | PR merged into <base> with CI green>. Also met after 80 turns."
+2. Already inside a `/goal` that names this plugin: it is set. Record it in `RUN.md` and go on.
+3. Otherwise, load the run tools with one `ToolSearch` (`select:mcp__goal-orchestrator__start_goal,mcp__goal-orchestrator__run_start,mcp__goal-orchestrator__run_finish`). Then, first match wins:
+   - `start_goal` with `condition` and `run_file` (the absolute `RUN.md` path): say in one line that goal mode is armed and end your turn. `/goal` starts when the turn ends and brings you back (Step 0c).
+   - `ProposeGoal`, if the session offers it: the condition cut to 500 characters (the full one stays in `RUN.md`); `ask_user: false` only when the user picked the finish line. End your turn.
+   - Neither: around, give the user `/goal <condition>` to paste and wait; away, say so in one line and carry on.
+4. Never clear or replace the goal yourself; the user can `/goal clear`.
+
+## Step 0c: Resume
+
+On every turn of a run (after `/goal` starts one, a compaction, a resume or the workflow's result), read `RUN.md` first and continue from the step it records. Never repeat the intake for a run that has a `RUN.md`.
+
 ## Step 1: Recon (cheap; send wide sweeps to an Explore agent)
 
 1. From the steering files (`AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING`, `README`, `TESTING`) and the CI config: app root, package manager, check commands (typecheck, lint, unused code, unit, integration, e2e, schema verification), invariants, doc owners, commit and PR conventions, tracker rules. Use the repo's code-graph index if it has one.
@@ -28,7 +43,7 @@ Follow [intake](references/intake.md).
 3. Environment: a test DB (native; no Docker unless the repo requires it), a browser for e2e, network access, and how each agent gets its own DB and port.
 4. Create or check out the feature branch (the session's designated branch if given), push it, and run `git config rerere.enabled true`. Note its base: `git merge-base <default-branch> <feature-branch>`.
 5. Run the fast checks once on the base. List any failures in `BRIEF.md` as pre-existing, so agents don't re-prove them.
-6. Load the run tools with one `ToolSearch` (`select:mcp__goal-orchestrator__run_start,mcp__goal-orchestrator__run_finish`), then call `run_start` (branch, absolute repo path, any budget the user gave).
+6. Call `run_start` (branch, absolute repo path, any budget the user gave).
 
 ## Step 2: Plan
 
@@ -54,7 +69,7 @@ Follow [intake](references/intake.md).
 ## Step 3: Ship
 
 1. Launch `Workflow` with `name: "goal-orchestrator:ship"` and `args`: the plan object itself, not a JSON string. If that name isn't found, pass `scriptPath`: `workflows/ship.js` two folders above this skill's base directory. If the result has `error`, fix the plan and relaunch. Note the `runId` and `transcriptDir` in `RUN.md`.
-2. Per wave, the workflow has failing contract tests written from the Done-when items, runs one implementer per lane in its own worktree, re-runs every claim, sends exact gaps back (at most 2 retries, then the lane is dropped), merges, reviews (UI audits included) and turns findings into fix lanes. Then the final gate, with up to 2 fix rounds, and a whole-diff review. Don't poll it and don't duplicate its work: end your turn with the line `Waiting for the ship workflow.`; the result arrives as a task notification. If anything wakes you before it, answer with that line again and no tool calls.
+2. Per wave, the workflow has failing contract tests written from the Done-when items, runs one implementer per lane in its own worktree, re-runs every claim, sends exact gaps back (at most 2 retries, then the lane is dropped), merges, reviews (UI audits included) and turns findings into fix lanes. Then the final gate, with up to 2 fix rounds, and a whole-diff review. Don't poll it and don't duplicate its work: end your turn with the line `Waiting for the ship workflow.`; the result arrives as a task notification. If anything wakes you before it (a goal check-in, the watchdog), answer with that line again and no tool calls.
 3. Save the result to `reports/ship.json`. Record in `RUN.md` the head, the gate checks, what shipped and what didn't and why; append the lanes' decisions to `DECISIONS.md`.
 4. `questions` (around mode): ask the user, add each answer to its lane as `"answers": [...]`, and relaunch with `resumeFromRunId`; finished agents return their saved results. Relaunch the same way if the run was cut off.
 5. Open security findings are never dropped: fix them, ask (around), or put them first in the PR (away).

@@ -1,6 +1,6 @@
 # Manual waves
 
-Only for a session without the `Workflow` tool. You drive what the ship workflow would: the plan's waves, then the final gate. Load `SendMessage` with the run tools (`select:…,SendMessage`).
+Only for a session without the `Workflow` tool. You drive what the ship workflow would: the plan's waves, then the final gate. Load `SendMessage` with one `ToolSearch` (`select:SendMessage`).
 
 ## Run a wave
 
