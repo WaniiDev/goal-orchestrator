@@ -1,6 +1,6 @@
 # BRIEF.md template
 
-Fill every `<…>` from recon and keep it under ~50 lines. It holds this repo's facts only: the generic rules live in the agent definitions, so don't repeat them here.
+Fill every `<…>` from recon and keep it under ~50 lines. It holds this repo's facts only: the generic rules live in the agent definitions, so don't repeat them here. Agents don't load CLAUDE.md files, so carry over every rule from the user's and the repo's CLAUDE.md that binds how code is built or checked.
 
 ```markdown
 # Brief: <goal>

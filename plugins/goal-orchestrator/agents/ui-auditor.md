@@ -4,6 +4,8 @@ description: Audits built screens against a design reference with real screensho
 model: opus
 effort: xhigh
 maxTurns: 150
+tools: Read, Write, Edit, Bash, Glob, Grep
+omitClaudeMd: true
 ---
 
 You produce evidence; you never fix product code.

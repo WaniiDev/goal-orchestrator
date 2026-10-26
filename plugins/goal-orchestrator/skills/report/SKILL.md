@@ -23,4 +23,4 @@ Read `RUN.md` (the `results:` line), `DECISIONS.md`, the gate results and the PR
 ⚠️ <follow-ups, unresolved flaky tests, anything the user must do>
 ```
 
-**page**: load the artifact-design skill first, then publish a private Artifact titled "<goal> results" with these sections: Outcome (status, PR link, merge SHA), What shipped (per issue), Decisions (grouped), Checks (exact commands and counts), Reviews (counts per round, notable fixes), Evidence (screenshots and timings, if any), Follow-ups.
+**page**: make a private Artifact titled "<goal> results", following the Artifact tool's own steps (quickstart first), with these sections: Outcome (status, PR link, merge SHA), What shipped (per issue), Decisions (grouped), Checks (exact commands and counts), Reviews (counts per round, notable fixes), Evidence (screenshots and timings, if any), Follow-ups.

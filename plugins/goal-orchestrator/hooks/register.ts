@@ -12,6 +12,8 @@ type $ = EngineInterface
 const RUN = { plugin: 'goal-orchestrator', key: 'run' } as const
 const START = 'mcp__goal-orchestrator__run_start'
 const FINISH = 'mcp__goal-orchestrator__run_finish'
+// The desktop app's end-of-turn tools (task list, wrap-up box): bookkeeping, not work.
+const TURN_TOOLS = 'mcp__ccd_turn__'
 const OUTCOMES: readonly Outcome[] = ['DONE', 'PARTIAL', 'BLOCKED']
 const CHECK_HEAD_MS = 30_000
 const TICK_MS = 5 * 60_000
@@ -89,7 +91,14 @@ function end($: $, current: Run, phase: 'ended' | 'stopped', outcome: Outcome, s
   current.summary = summary
   ticker?.cancel()
   ticker = null
-  void $.ui.notify(finalLine(outcome, summary), { title: 'goal-orchestrator' }).catch(() => undefined)
+  const line = finalLine(outcome, summary)
+  // A session the desktop app hosts has no notification channel for mods: toast there.
+  void $.ui
+    .notify(line, { title: 'goal-orchestrator' })
+    .then(sent => {
+      if (!sent.isSent) $.ui.toast(line)
+    })
+    .catch(() => undefined)
 }
 
 // /goal only clears itself on met / impossible / fatal error, so every
@@ -139,7 +148,7 @@ async function tick($: $): Promise<void> {
   await save($)
   await $.prompt
     .submit({
-      text: `goal-orchestrator watchdog: no tool call and no agent report for ${run.limits.maxQuietMinutes} min. Check the running agents (TaskList / TaskGet); relaunch or drop a hung lane, or call run_finish if the run cannot continue.`,
+      text: `goal-orchestrator watchdog: no tool call and no agent report for ${run.limits.maxQuietMinutes} min. Check the running agents (ListAgents); relaunch or drop a hung lane, or call run_finish if the run cannot continue.`,
     })
     .catch(() => undefined)
 }
@@ -258,12 +267,14 @@ export const register: Register = on => {
       await save($)
       status($, await $.clock.now())
     }
-    return { result: `Run recorded as ${outcome}. Make no more tool calls. End your reply with this exact line:\n${line}` }
+    return {
+      result: `Run recorded as ${outcome}. Make no more tool calls, apart from the app's own end-of-turn wrap-up if it asks for one. End your reply with this exact line:\n${line}`,
+    }
   }).catch(() => ({ deny: 'run_finish failed inside the goal-orchestrator mod; end your reply with the GOAL line yourself.' }))
 
   // Every other tool call: the guards, the terminal lock, and the watchdog.
   on('tool.call', async ($, e, next) => {
-    if (e.tool === START || e.tool === FINISH || run === null) return next(e)
+    if (e.tool === START || e.tool === FINISH || String(e.tool).startsWith(TURN_TOOLS) || run === null) return next(e)
     const current = run
     const isMain = e.agentId === undefined
 
@@ -278,7 +289,11 @@ export const register: Register = on => {
     const guard = command === '' ? undefined : guardReason(command)
     if (guard !== undefined) return { deny: `goal-orchestrator guard: ${guard}.` }
 
-    if (!isMain) return next(e)
+    if (!isMain) {
+      // A sub-agent at work is activity, not progress: a long lane is not a quiet run.
+      current.lastActivityAt = await $.clock.now()
+      return next(e)
+    }
 
     if (current.phase === 'wrapup') {
       if (e.tool === 'Agent') return { deny: `No new agents: ${current.reason}. Wrap up and call run_finish.` }

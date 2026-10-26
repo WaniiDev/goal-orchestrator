@@ -18,7 +18,7 @@ Read each reference only at its step: [intake](references/intake.md) (0), [brief
 ## Step 0: Intake
 
 Follow [intake](references/intake.md).
-- **Away**: after intake, never ask or wait. Decide by issue text > plan doc > design reference > repo docs and ADRs > smallest safe option; log each decision. Push after every merge. Arm a `send_later` check-in while you wait on long work.
+- **Away**: after intake, never ask or wait. Decide by issue text > plan doc > design reference > repo docs and ADRs > smallest safe option; log each decision. Push after every merge.
 - **Around**: ask only about scope, architecture, data model or anything destructive; still log decisions.
 
 ## Step 1: Recon (cheap; send wide sweeps to an Explore agent)
@@ -28,25 +28,25 @@ Follow [intake](references/intake.md).
 3. Environment: a test DB (native; no Docker unless the repo requires it), a browser for e2e, network access, and how each agent gets its own DB and port.
 4. Create or check out the feature branch (the session's designated branch if given), push it, and run `git config rerere.enabled true`.
 5. Run the fast checks once on the base. List any failures in `BRIEF.md` as pre-existing, so agents don't re-prove them.
-6. Load the run tools with one `ToolSearch` (`select:mcp__goal-orchestrator__run_start,mcp__goal-orchestrator__run_finish`), then call `run_start` (branch, absolute repo path, any budget the user gave).
+6. Load the run tools and `SendMessage` with one `ToolSearch` (`select:mcp__goal-orchestrator__run_start,mcp__goal-orchestrator__run_finish,SendMessage`), then call `run_start` (branch, absolute repo path, any budget the user gave).
 
 ## Step 2: Plan
 
 - A **lane** is one issue (or a tight group) that one implementer owns end to end, with named files. A **wave** is 3–5 lanes with disjoint files. Order by dependency: schema and server before UI, shared primitives before the screens that use them. Docs-only and test-only lanes ride along.
-- Put the waves, lanes, owned files, and DB and port per lane in `RUN.md`. Create one task per wave, plus "Final gate" and "Deliver".
+- Put the waves, lanes, owned files, and DB and port per lane in `RUN.md`. In the session's task list, add one item per wave, plus "Final gate" and "Deliver".
 - Write `BRIEF.md` from the [template](references/brief-template.md). It is the distilled repo profile that agents read instead of the steering docs.
 
 ## Step 3: Run a wave
 
 For each lane:
 1. `git worktree add -b lane-<id> <repo>/.claude/worktrees/lane-<id> <feature-branch>`. Don't use `isolation: "worktree"`: it branches from the default branch. Copy in any untracked local test config the lane needs.
-2. Launch `Agent` with `subagent_type: "goal-orchestrator:implementer"`, `model` and `effort` from `RUN.md`, and `run_in_background: true`. The prompt holds only: the worktree path, the `BRIEF.md` path, the issue(s) and Done-when items, owned files and files to avoid, the DB and port, and the e2e filter. The agent definition carries its rules and report format.
+2. Launch `Agent` with `subagent_type: "goal-orchestrator:implementer"`, `name: "lane-<id>"`, and `model` and `effort` from `RUN.md`; it runs in the background. The prompt holds only: the worktree path, the `BRIEF.md` path, the issue(s) and Done-when items, owned files and files to avoid, the DB and port, and the e2e filter. The agent definition carries its rules and report format.
 3. While lanes run, prepare the next wave. Don't duplicate their work.
 
 When a lane reports:
 - Save the report to `reports/lane-<id>.md` and keep one verdict line in context.
 - Spot-check one claim by re-running one command.
-- Send gaps back to the same agent (`SendMessage`) with the exact gap. After 2 retries, re-plan or drop the lane (see Stop conditions).
+- Send gaps back to the same agent (`SendMessage` to `lane-<id>`) with the exact gap. After 2 retries, re-plan or drop the lane (see Stop conditions).
 - Merge: `git merge --no-ff lane-<id> -m "Merge <ISSUE>: <summary>"` plus attribution trailers. Resolve conflicts per hunk, keeping both sides' intent.
 - Run the fast checks on the merged area. Stage everything you touched (`git status --short` is empty after the commit), then push.
 
@@ -73,7 +73,7 @@ Follow [delivery](references/delivery.md):
 2. Drive CI to green, then merge if the finish line says so.
 3. Update the tracker.
 4. Produce the final results with the [report](../report/SKILL.md) skill.
-5. Clean up: remove worktrees, unsubscribe after the merge, cancel check-ins.
+5. Clean up: remove worktrees, and stop watching the PR after the merge.
 6. Call `run_finish` last.
 
 ## Stop conditions
@@ -88,7 +88,7 @@ Finish as `BLOCKED` or `PARTIAL` instead of retrying when:
 - a lane fails 2 retries (re-plan it once, then drop it → `PARTIAL`);
 - the watchdog says to wrap up.
 
-Before `run_finish`, in order: push, update `RUN.md`, `DECISIONS.md` and the PR or draft PR, remove the worktrees, cancel check-ins. After `run_finish`, make no more tool calls, and end the reply with the `GOAL: …` line it returns. In away mode a block is not a question: finish, and the user reads the line when they're back.
+Before `run_finish`, in order: push, update `RUN.md`, `DECISIONS.md` and the PR or draft PR, remove the worktrees. After `run_finish`, make no more tool calls (the app's own end-of-turn wrap-up excepted), and end the reply with the `GOAL: …` line it returns. In away mode a block is not a question: finish, and the user reads the line when they're back.
 
 The plugin's mod enforces this:
 - **Progress** is a new commit on the feature branch or an agent report.

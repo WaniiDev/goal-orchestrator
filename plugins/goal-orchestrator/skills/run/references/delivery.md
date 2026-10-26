@@ -30,7 +30,7 @@ Reviews: <rounds run; every finding fixed or logged>
 End the body with the session's attribution lines. If the gate runs again after the PR is opened, update the numbers.
 
 ## Drive to green
-- Subscribe to PR activity; never poll with sleep.
+- Watch the PR with the session's own PR tools (in the desktop app, `ccd_pr`); never poll with sleep or a timer.
 - Red CI: read the job log. If the failure is this PR's, fix it, prove it locally, push. If it's infrastructure the diff doesn't touch, comment once on the PR with the evidence and re-run the failed job once.
 - Never skip, disable or quarantine a test. Never push an empty commit, and never close and reopen to kick CI.
 - Merge only for `pr+merge` (or a later explicit yes), with CI green and the PR mergeable. Pass the expected head SHA, and use the repo's merge method (merge commit by default).

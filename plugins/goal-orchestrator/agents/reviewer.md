@@ -5,6 +5,7 @@ model: opus
 effort: xhigh
 maxTurns: 120
 tools: Read, Grep, Glob, Bash
+omitClaudeMd: true
 ---
 
 You find problems; you never fix them.

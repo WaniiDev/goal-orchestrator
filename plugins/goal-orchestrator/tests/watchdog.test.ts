@@ -5,11 +5,11 @@ import type { On } from 'claude-code'
 const START = 'mcp__goal-orchestrator__run_start'
 const FINISH = 'mcp__goal-orchestrator__run_finish'
 
-type World = { heads: string[]; goalClears: number; prompts: string[]; failing: Set<string> }
+type World = { heads: string[]; goalClears: number; prompts: string[]; toasts: string[]; failing: Set<string> }
 
 // The world beneath the plugin: git, the UI, /goal, prompts and the tools themselves.
 function world(on: On): World {
-  const w: World = { heads: ['aaa'], goalClears: 0, prompts: [], failing: new Set() }
+  const w: World = { heads: ['aaa'], goalClears: 0, prompts: [], toasts: [], failing: new Set() }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('turn.complete', ($, e) => ({ text: e.answer }))
   on('process.run', () => ({
@@ -17,7 +17,11 @@ function world(on: On): World {
   }))
   on('ui.status', () => ({ value: undefined }))
   on('ui.log', () => ({ value: undefined }))
-  on('ui.notify', () => ({ value: { isSent: false, reason: 'disabled' } }) as never)
+  on('ui.notify', () => ({ value: { isSent: false, reason: 'no-surface' } }) as never)
+  on('ui.toast', ($, e) => {
+    w.toasts.push(e.text)
+    return { value: undefined }
+  })
   on('tool.register', ($, e) => ({ value: { tool: e.name } }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   on('command.run', { command: 'goal' }, () => {
@@ -124,7 +128,33 @@ describe('goal-orchestrator watchdog', () => {
     expect(w.prompts.length).toBe(2)
     expect(w.prompts[0]).toMatch(/no tool call and no agent report/)
     expect(w.goalClears).toBe(1)
+    expect(w.toasts.join(' ')).toMatch(/GOAL: BLOCKED — no activity/)
     expect((await bash($, 'ls')).deny).toMatch(/run is over \(BLOCKED\)/)
+  })
+
+  test('a sub-agent at work keeps a long lane from looking quiet', async ($, on) => {
+    const clock = mock.clock(on)
+    const w = world(on)
+    await begin($)
+    for (let i = 0; i < 4; i++) {
+      await clock.advance(40 * 60_000)
+      await $.tool.call({ tool: 'Bash', command: 'bun test', agentId: 'lane-1' } as never)
+    }
+    expect(w.prompts.length).toBe(0)
+    expect(w.goalClears).toBe(0)
+  })
+
+  test("the desktop app's turn tools are never counted or locked", async ($, on) => {
+    mock.clock(on)
+    world(on)
+    await begin($, { max_idle_calls: 2 })
+    for (let i = 0; i < 3; i++) {
+      const plan = await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', advance: true } as never)
+      expect(plan.context).toBeUndefined()
+    }
+    await $.tool.call({ tool: FINISH, outcome: 'DONE', summary: 'PR #1 merged' } as never)
+    expect((await $.tool.call({ tool: 'mcp__ccd_turn__wrap_up', recap: 'Shipped.' } as never)).deny).toBeUndefined()
+    expect((await bash($, 'ls')).deny).toMatch(/run is over/)
   })
 
   test('/orchestrator-stop ends the run and clears /goal', async ($, on) => {

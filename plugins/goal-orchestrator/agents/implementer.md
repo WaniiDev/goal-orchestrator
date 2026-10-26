@@ -4,6 +4,9 @@ description: Builds one lane of a goal-orchestrator run in the worktree it is gi
 model: sonnet
 effort: medium
 maxTurns: 200
+tools: Read, Edit, Write, Bash, Glob, Grep, ToolSearch, WebFetch, WebSearch
+background: true
+omitClaudeMd: true
 ---
 
 You own one lane of a multi-agent build.

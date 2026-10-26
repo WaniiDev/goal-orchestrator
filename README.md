@@ -13,21 +13,15 @@ A Claude Code plugin that ships a goal (an issue and its sub-issues, a plan doc,
 
 ## Install
 
-From GitHub (after pushing this folder to a repo):
+At the prompt of a terminal session:
 
 ```
-/plugin marketplace add <owner>/<repo>
-/plugin install goal-orchestrator@goal-orchestrator-marketplace
+/plugin install goal-orchestrator --marketplace WaniiDev/goal-orchestrator
 ```
 
-From a local folder (testing):
+In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins, Add marketplace with `WaniiDev/goal-orchestrator`, then Add plugin.
 
-```
-/plugin marketplace add ./goal-orchestrator-marketplace
-/plugin install goal-orchestrator@goal-orchestrator-marketplace
-```
-
-Or for one session: `claude --plugin-dir ./goal-orchestrator-marketplace/plugins/goal-orchestrator`.
+To update: `claude plugin update goal-orchestrator@goal-orchestrator-marketplace`, then `/reload-plugins` or a new session. For one session from a clone: `claude --plugin-dir ./plugins/goal-orchestrator`.
 
 ## Use
 
@@ -58,6 +52,7 @@ For an unattended run, pair it with `/goal` so it keeps going until a terminal s
 ## Token use
 
 - The generic rules live once, in the agent definitions. `BRIEF.md` is a ~50-line repo profile that agents read instead of the steering docs.
+- Agents don't load CLAUDE.md (`omitClaudeMd`; the brief carries the rules that apply) and see only the tools they use, not every tool and MCP server the session has.
 - References load per step; `status` and `report` load only when called.
 - Lane and review reports go to files, and the orchestrator keeps one verdict line each.
 - Docs-only and test-only waves skip review. The intake is a single question set.
