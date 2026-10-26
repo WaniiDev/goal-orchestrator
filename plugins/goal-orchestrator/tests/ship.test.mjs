@@ -62,7 +62,8 @@ function standard(label, prompt) {
     }
   }
   if (label.endsWith(' check')) return { checks: [{ ...OK, matchesReport: true }], contractUntouched: true, clean: true, outsideFiles: [] }
-  if (label.endsWith(' merge')) return { head: `head after ${label}`, merged: matches(prompt, /^- lane-([^:\s]+):/gm), failed: [], checks: [OK] }
+  // Real merge agents name lanes by branch (lane-<id>), as the cloud stress run showed.
+  if (label.endsWith(' merge')) return { head: `head after ${label}`, merged: matches(prompt, /^- [^:\s]+: branch (lane-[^,\s]+),/gm), failed: [], checks: [OK] }
   if (label.startsWith('gate')) return { head: 'gate-head', checks: [OK], failures: [] }
   return { findings: [] }
 }
@@ -110,9 +111,18 @@ test('a clean run writes the contract first, ships every lane and ends DONE', as
   assert.match(prompt('board build'), /git checkout contract-sha -- tests\/board\.test\.ts and commit them/)
   assert.doesNotMatch(prompt('board build'), /input\.test/)
   assert.match(prompt('wave 1 contract'), /worktree add -b contract-wave-1/)
+  assert.match(prompt('wave 1 contract'), /typecheck and lint under its config as it is\. Write no feature code and change no config/)
   assert.match(prompt('wave 1 review'), /git diff base-sha\.\.head after wave 1 merge/)
   assert.equal(result.head, 'gate-head')
   assert.equal(result.gate.green, true)
+})
+
+test('merges, gates and reviews run in clean worktrees, away from the lane worktrees in the main checkout', async () => {
+  const { prompt } = await ship(plan())
+  assert.match(prompt('wave 1 merge'), /worktree add --detach \/repo\/\.claude\/worktrees\/check-wave-1 HEAD/)
+  assert.match(prompt('gate 1'), /worktree add --detach \/repo\/\.claude\/worktrees\/check-gate-1 feat\/game/)
+  assert.match(prompt('wave 1 review'), /worktree add --detach \/repo\/\.claude\/worktrees\/review-wave-1 feat\/game/)
+  assert.match(prompt('the whole diff review'), /worktrees\/review-the-whole-diff /)
 })
 
 test('each role keeps its own model and effort', async () => {
@@ -136,6 +146,57 @@ test('UI lanes get one audit per area, on the reviewer model unless the auditor 
   assert.deepEqual(audits.map(call => call.label), ['wave 1 audit board', 'wave 1 audit menus', 'the whole diff audit board', 'the whole diff audit menus'])
   for (const call of audits) assert.deepEqual([call.model, call.effort], ['opus', 'xhigh'])
   assert.ok(labels.includes('wave 1 review'))
+})
+
+test('UI audits without a design reference check the Done-when items at desktop and phone sizes', async () => {
+  const waves = structuredClone(PLAN.waves)
+  waves[0].lanes[0].ui = true
+  const { prompt } = await ship(plan({ waves, ui: { areas: [{ name: 'board' }] } }))
+  const audit = prompt('wave 1 audit board')
+  assert.match(audit, /No design reference: the Done-when items about the screen are the reference/)
+  assert.match(audit, /desktop \(1280×720\) and phone \(390×844\)/)
+  assert.match(audit, /Issues and Done-when:\n- GAME-1: the board is 10x20/)
+  assert.doesNotMatch(audit, /undefined/)
+})
+
+test('untested Done-when items, lane notes and outside edits reach the reviewers and the result', async () => {
+  const { result, prompt } = await ship(plan(), {
+    'wave 1 contract': {
+      sha: 'contract-sha',
+      lanes: [
+        { id: 'board', files: ['tests/board.test.ts'], untestable: ['the board fits a 1280x720 window: needs a real browser'] },
+        { id: 'input', files: ['tests/input.test.ts'], untestable: [] },
+      ],
+    },
+    'board build': prompt => ({ ...standard('board build', prompt), open: ['the HUD layout needs the renderer'] }),
+    'board check': { checks: [{ ...OK, matchesReport: true }], contractUntouched: true, clean: true, outsideFiles: ['tsconfig.json'] },
+  })
+  const review = prompt('wave 1 review')
+  assert.match(review, /GAME-1: no automated test proves this, so check it by hand: the board fits a 1280x720 window/)
+  assert.match(review, /GAME-1: the lane left a note: the HUD layout needs the renderer/)
+  assert.match(review, /GAME-1: changed files outside its own: tsconfig\.json/)
+  assert.match(prompt('the whole diff review'), /check each by hand:\n- GAME-1: the board fits a 1280x720 window/)
+  assert.deepEqual(result.untestable, ['GAME-1: the board fits a 1280x720 window: needs a real browser'])
+  const board = result.lanes.find(lane => lane.id === 'board')
+  assert.deepEqual([board.notes, board.outside], [['the HUD layout needs the renderer'], ['tsconfig.json']])
+  assert.equal(result.outcome, 'DONE')
+})
+
+test('fix lanes show under the round that made them, and a lane report must cover every item and name a commit', async () => {
+  const finding = { severity: 'should', file: 'src/board.ts', problem: 'step() is not pure', fix: 'copy the queue' }
+  const { calls } = await ship(plan(), {
+    'wave 1 review': { findings: [finding] },
+    'gate 1': red('line clear is off by one', ['src/board.ts']),
+  })
+  const phaseOf = label => calls.find(call => call.label === label)?.phase
+  assert.deepEqual(
+    ['board build', 'board check', 'wave-1-review-fix1 build', 'wave-1-review-fix1 check', 'gate-1-fix1 build'].map(phaseOf),
+    ['Build', 'Build', 'Review', 'Review', 'Final gate'],
+  )
+  const { schema } = calls.find(call => call.label === 'board build')
+  assert.equal(schema.properties.doneWhen.minItems, 2)
+  const sha = new RegExp(schema.properties.sha.pattern)
+  assert.ok(sha.test('411d9b3') && sha.test('') && !sha.test('see-below'))
 })
 
 test('a claim that does not re-run gets a fix attempt with the exact gap', async () => {
@@ -200,6 +261,17 @@ test('a blocked lane is dropped at once, with no retries', async () => {
   assert.ok(!labels.includes('input check') && !labels.includes('input fix 1'))
   assert.equal(result.outcome, 'PARTIAL')
   assert.equal(result.notShipped[0].why, 'needs the LEADERBOARD_TOKEN secret')
+})
+
+test('lanes merged under their branch names or bare ids both count as merged', async () => {
+  const { result, labels, prompt } = await ship(plan(), {
+    'wave 1 merge': { head: 'h1', merged: ['lane-board', 'input'], failed: [], checks: [OK] },
+  })
+  assert.equal(result.outcome, 'DONE')
+  assert.deepEqual(result.notShipped, [])
+  assert.deepEqual(result.leftover, [])
+  assert.ok(labels.includes('wave 1 review'))
+  assert.match(prompt('the whole diff review'), /GAME-1: .*\n- GAME-2: /)
 })
 
 test('a failed merge keeps the lane out of the shipped list', async () => {

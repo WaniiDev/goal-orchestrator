@@ -14,7 +14,7 @@ When a lane reports:
 - Spot-check one claim by re-running one command.
 - Send gaps back to the same agent (`SendMessage` to `lane-<id>`) with the exact gap. After 2 retries, re-plan or drop the lane.
 - Merge: `git merge --no-ff lane-<id> -m "Merge <ISSUE>: <summary>"` plus attribution trailers. Resolve conflicts per hunk, keeping both sides' intent.
-- Run the fast checks on the merged area. Stage everything you touched (`git status --short` is empty after the commit), then push.
+- Run the fast checks on the merged area in a clean worktree of the new head (`git worktree add --detach <repo>/.claude/worktrees/check-<n> HEAD`, removed afterwards), not in the main checkout, whose test runner would pick up the lane worktrees. Stage everything you touched (`git status --short` is empty after the commit), then push.
 
 ## Review the wave
 
@@ -24,7 +24,7 @@ Save the findings to `reports/`. Turn must-fix and should-fix findings into fix 
 
 ## Final gate
 
-If the base moved, merge it in first; prefer that to rebasing. On the feature head, run everything (background long runs) and record exact results in `RUN.md`:
+If the base moved, merge it in first; prefer that to rebasing. In a clean worktree of the feature head, run everything (background long runs) and record exact results in `RUN.md`:
 - typecheck for app and tests, lint, unused code;
 - the full unit and integration suites with the real DB;
 - schema verification;

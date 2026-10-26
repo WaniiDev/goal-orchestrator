@@ -10,7 +10,7 @@ A Claude Code plugin that ships a goal (an issue and its sub-issues, a plan doc,
    - **Contract first.** An agent turns the Done-when items into failing acceptance tests before any feature code exists.
    - **Lanes.** Implementer agents build in parallel, each in its own worktree from the feature branch, with its own database and port, and make the contract tests pass without editing them.
    - **Re-checked claims.** An integrator re-runs every check a lane reports, compares the counts, and confirms the contract tests are untouched and no lane edited another's files. Gaps go back to the lane, at most twice; then the lane is dropped and the run ends `PARTIAL` instead of looping. High-risk lanes get a review before they merge.
-   - **Merge and review.** Ready lanes merge, the fast checks run, a reviewer (and, for UI goals, UI auditors with real screenshots) checks the wave, and findings become fix lanes.
+   - **Merge and review.** Ready lanes merge and the fast checks run in a clean worktree. A reviewer (and, for goals with screens, UI auditors with real screenshots) checks the wave and whatever no test can prove, and findings become fix lanes.
 4. **Final gate.** The full suites, up to two fix rounds, then a whole-diff review.
 5. **Deliver.** The PR with Issues, Decisions, Migrations, Ops notes and Tests; CI driven to green; a merge if you chose it; tracker checkpoints; and your final results.
 
@@ -40,6 +40,8 @@ To update: `claude plugin update goal-orchestrator@goal-orchestrator-marketplace
 Or ask in plain words ("ship WAN-346 and its sub-issues as one PR while I sleep"). Claude can start the run skill itself, so another session, or a `/goal` that names goal-orchestrator, can start a run too.
 
 After the intake, the run arms `/goal` itself (`start_goal`), so it keeps going until a terminal state and never past one: goal mode waits while the ship workflow runs, and every terminal state clears it. Watch the ship phase live with `/workflows`. `/orchestrator-stop` ends a run by hand (as `BLOCKED`) and clears `/goal`.
+
+Headless (`claude -p`): set `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`. Otherwise print mode stops background work 10 minutes after the last turn, which cuts the ship workflow off mid-run.
 
 `--auto` skips the intake and uses the defaults: Sonnet · medium to build, Opus · xhigh to review, away mode, PR only (never merges without your yes). Results: the chat summary, the PR body, and tracker checkpoints when a tracker connector exists.
 

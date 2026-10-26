@@ -34,7 +34,11 @@ const LANE = {
   required: ['status', 'sha', 'files', 'doneWhen', 'checks'],
   properties: {
     status: { type: 'string', enum: ['done', 'partial', 'blocked'] },
-    sha: { type: 'string', description: 'head of your lane branch' },
+    sha: {
+      type: 'string',
+      pattern: '^([0-9a-f]{7,40})?$',
+      description: 'your last commit on the lane branch, made before this report (empty only if blocked before any commit)',
+    },
     files: { type: 'array', items: { type: 'string' } },
     doneWhen: {
       type: 'array',
@@ -55,6 +59,11 @@ const LANE = {
     questions: { type: 'array', items: { type: 'string' }, description: 'around mode only: what only the user can decide' },
   },
 }
+// One Done-when entry per item: a short report fails at the tool call, not after a whole re-check and retry.
+const laneSchema = lane => ({
+  ...LANE,
+  properties: { ...LANE.properties, doneWhen: { ...LANE.properties.doneWhen, minItems: lane.doneWhen.length } },
+})
 const VERIFY = {
   type: 'object',
   required: ['checks', 'contractUntouched', 'clean', 'outsideFiles'],
@@ -118,7 +127,7 @@ const MERGE = {
   required: ['head', 'merged', 'failed', 'checks'],
   properties: {
     head: { type: 'string' },
-    merged: { type: 'array', items: { type: 'string' }, description: 'ids of the lanes now merged' },
+    merged: { type: 'array', items: { type: 'string' }, description: 'the lanes now merged, by the id before each colon' },
     failed: {
       type: 'array',
       items: { type: 'object', required: ['id', 'why'], properties: { id: { type: 'string' }, why: { type: 'string' } } },
@@ -163,6 +172,7 @@ const actionable = finding => finding.severity !== 'nit' || finding.security ===
 const describe = f =>
   `${f.severity}${f.security ? ' (security)' : ''} ${f.file}${f.line ? `:${f.line}` : ''} — ${f.problem} — fix: ${f.fix}`
 const budgetLow = () => typeof budget !== 'undefined' && budget.total && budget.remaining() < RESERVE
+const untestableOf = (contract, id) => ((contract.lanes || []).find(entry => entry.id === id) || {}).untestable || []
 
 // An agent call that throws (a spent token budget does) counts as no answer and
 // stops the run, so the workflow still returns what it has.
@@ -193,7 +203,7 @@ async function writeContract(wave, w) {
   const contract = await call(
     [
       `Write the acceptance contract for wave ${w}. ${WHERE}`,
-      `Work in a throwaway worktree: git -C ${plan.repo} worktree add -b ${branch} ${tree} ${plan.branch} (if branch ${branch} already exists from an earlier attempt, add the worktree on it and check what it holds). For each Done-when item below that an automated test can prove, write a failing acceptance test in the repo's test layout, in files of each lane's own. Run them and confirm each fails because the feature is missing. Write no feature code.`,
+      `Work in a throwaway worktree: git -C ${plan.repo} worktree add -b ${branch} ${tree} ${plan.branch} (if branch ${branch} already exists from an earlier attempt, add the worktree on it and check what it holds). For each Done-when item below that an automated test can prove, write a failing acceptance test in the repo's test layout, in files of each lane's own. Run them and confirm each fails only because the feature is missing: the test files themselves pass the repo's typecheck and lint under its config as it is. Write no feature code and change no config. List every item you can't test as untestable, with why.`,
       `Commit the tests on ${branch} as one commit in the brief's format ("Add acceptance tests for wave ${w}"). Don't push. Remove the worktree and keep the branch: each lane brings in only its own tests, so a lane that doesn't ship leaves no failing tests behind.`,
       ...lanes.map(lane => `Lane ${lane.id} (${lane.issues.join(', ')}), will own ${lane.owns.join(', ')}:\n${list(lane.doneWhen)}`),
     ].join('\n\n'),
@@ -248,7 +258,7 @@ function laneGaps(lane, wave, report, check) {
   return gaps
 }
 
-async function runLane(lane, wave, contract) {
+async function runLane(lane, wave, contract, phaseTitle = 'Build') {
   const tree = `${plan.repo}/.claude/worktrees/lane-${lane.id}`
   const tests = (contract.lanes || []).find(entry => entry.id === lane.id)
   const task = [
@@ -267,7 +277,7 @@ async function runLane(lane, wave, contract) {
     .filter(Boolean)
     .join('\n')
 
-  let report = await call(task, opts('implementer', `${lane.id} build`, 'Build', LANE))
+  let report = await call(task, opts('implementer', `${lane.id} build`, phaseTitle, laneSchema(lane)))
   for (let attempt = 1; ; attempt++) {
     if (plan.mode === 'around' && report && (report.questions || []).length) {
       return { id: lane.id, issues: lane.issues, status: 'questions', questions: report.questions, attempts: attempt }
@@ -279,58 +289,79 @@ async function runLane(lane, wave, contract) {
       return { id: lane.id, issues: lane.issues, status: 'dropped', gaps, report, attempts: attempt }
     }
     const check = report
-      ? await call(checkPrompt(lane, tree, tests, contract, report), opts('integrator', `${lane.id} check`, 'Build', VERIFY))
+      ? await call(checkPrompt(lane, tree, tests, contract, report), opts('integrator', `${lane.id} check`, phaseTitle, VERIFY))
       : null
     let gaps = laneGaps(lane, wave, report, check)
     if (gaps.length === 0 && lane.risk === 'high') {
       const review = await call(
         `Review lane ${lane.id} before it merges. Worktree ${tree}, read only. Brief: ${plan.brief}. Diff: git diff ${plan.branch}...lane-${lane.id}.\nDone when:\n${list(lane.doneWhen)}`,
-        opts('reviewer', `${lane.id} review`, 'Build', FINDINGS),
+        opts('reviewer', `${lane.id} review`, phaseTitle, FINDINGS),
       )
       gaps = (review ? review.findings : [])
         .filter(f => f.severity === 'must' || f.security === true)
         .map(describe)
     }
-    if (gaps.length === 0) return { id: lane.id, issues: lane.issues, status: 'ready', report, attempts: attempt }
+    if (gaps.length === 0) {
+      return { id: lane.id, issues: lane.issues, status: 'ready', report, outside: check.outsideFiles || [], attempts: attempt }
+    }
     if (attempt > LIMITS.laneRetries) {
       log(`Lane ${lane.id} dropped after ${attempt} attempts: ${gaps[0]}`)
       return { id: lane.id, issues: lane.issues, status: 'dropped', gaps, report, attempts: attempt }
     }
     report = await call(
       `${task}\n\nYour last attempt left these gaps. Close each one, then report again:\n${list(gaps)}`,
-      opts('implementer', `${lane.id} fix ${attempt}`, 'Build', LANE),
+      opts('implementer', `${lane.id} fix ${attempt}`, phaseTitle, laneSchema(lane)),
     )
   }
 }
 
 async function merge(label, lanes, phaseTitle) {
   if (lanes.length === 0) return null
-  const merged = await call(
+  const tree = `${plan.repo}/.claude/worktrees/check-${slug(label)}`
+  const answer = await call(
     [
       `Merge ${label} into ${plan.branch}. ${WHERE}`,
       `In this order, one merge commit each: git merge --no-ff lane-<id> -m "Merge <issues>: <summary>" plus the brief's trailers. A lane already merged (a resumed run) counts as merged.\n${list(
-        lanes.map(lane => `lane-${lane.id}: ${lane.issues.join(', ')}`),
+        lanes.map(lane => `${lane.id}: branch lane-${lane.id}, ${lane.issues.join(', ')}`),
       )}`,
       CHECKS.fast.length
-        ? `Then run the fast checks: ${CHECKS.fast.join(' · ')}. Fix only what the merge broke; report anything else as a failed check.`
+        ? `Then run the fast checks in a clean worktree of the merged head, so the lane worktrees inside the repo stay out of them: git -C ${plan.repo} worktree add --detach ${tree} HEAD, copy in the local config the brief lists, run ${CHECKS.fast.join(' · ')} there, then remove it. Fix only what the merge broke, in the main checkout as its own commit; report anything else as a failed check.`
         : '',
-      "Push the branch. Remove each merged lane's worktree (git worktree remove); keep its branch.",
+      "Push the branch. Remove each merged lane's worktree (git worktree remove); keep its branch. Report each lane by the id before its colon.",
     ]
       .filter(Boolean)
       .join('\n\n'),
     opts('integrator', `${label} merge`, phaseTitle, MERGE),
   )
-  if (!merged) log(`${label}: the merge agent returned nothing, so nothing from it counts as merged.`)
-  else if (merged.failed.length) log(`${label}: ${merged.failed.length} merges failed (${merged.failed.map(f => f.id).join(', ')}).`)
+  if (!answer) {
+    log(`${label}: the merge agent returned nothing, so nothing from it counts as merged.`)
+    return null
+  }
+  // Merge agents name lanes by id or by branch (lane-<id>); both count.
+  const ids = new Set(lanes.map(lane => lane.id))
+  const toId = name => {
+    const text = String(name).trim()
+    return ids.has(text) ? text : text.replace(/^lane-/, '')
+  }
+  const merged = {
+    ...answer,
+    merged: answer.merged.map(toId).filter(id => ids.has(id)),
+    failed: answer.failed.map(failure => ({ ...failure, id: toId(failure.id) })),
+  }
+  if (merged.failed.length) log(`${label}: ${merged.failed.length} merges failed (${merged.failed.map(f => f.id).join(', ')}).`)
   return merged
 }
+
+// Reviews and audits work in a throwaway worktree on the head: the main checkout holds the lanes' worktrees.
+const throwaway = name =>
+  `Create a throwaway worktree: git -C ${plan.repo} worktree add --detach ${plan.repo}/.claude/worktrees/${name} ${plan.branch}; work there and remove it when done.`
 
 async function review(label, diff, scope, extra, withUi, phaseTitle) {
   const tasks = [
     () =>
       call(
         [
-          `Review ${label}. Checkout ${plan.repo} on ${plan.branch}, read only. Brief: ${plan.brief}. Diff: git diff ${diff}.`,
+          `Review ${label}, read only. ${throwaway(`review-${slug(label)}`)} Brief: ${plan.brief}. Diff: git diff ${diff}.`,
           `Issues and Done-when:\n${scope}`,
           extra,
         ]
@@ -340,14 +371,18 @@ async function review(label, diff, scope, extra, withUi, phaseTitle) {
       ),
   ]
   if (withUi && plan.ui) {
-    for (const area of plan.ui.areas || []) {
-      const tree = `${plan.repo}/.claude/worktrees/audit-${slug(label)}-${slug(area.name)}`
+    const ui = plan.ui
+    const reference = ui.reference
+      ? `Design reference: ${ui.reference}.${ui.standard ? ` House standard: ${ui.standard}.` : ''}`
+      : 'No design reference: the Done-when items about the screen are the reference. At every size, all of it is visible, nothing is cut off or overlapping, and the layout is what the items say.'
+    for (const area of ui.areas || []) {
       tasks.push(() =>
         call(
           [
-            `Audit ${area.name} for ${label}. Create a throwaway worktree: git -C ${plan.repo} worktree add --detach ${tree} ${plan.branch}; work there and remove it when done.`,
+            `Audit ${area.name} for ${label}. ${throwaway(`audit-${slug(label)}-${slug(area.name)}`)}`,
             `DB ${area.db || 'none'}, port ${area.port || 'none'}. Brief: ${plan.brief}.`,
-            `Design reference: ${plan.ui.reference}. House standard: ${plan.ui.standard}. Sizes and locales: ${plan.ui.sizes || 'desktop and phone'}.`,
+            `${reference} Sizes and locales: ${ui.sizes || 'desktop (1280×720) and phone (390×844)'}.`,
+            `Issues and Done-when:\n${scope}`,
             extra,
           ]
             .filter(Boolean)
@@ -382,7 +417,7 @@ async function fix(label, findings, phaseTitle) {
     }
   })
   const fixWave = { lanes: fixLanes }
-  const results = await parallel(fixLanes.map(lane => () => runLane(lane, fixWave, NO_CONTRACT)))
+  const results = await parallel(fixLanes.map(lane => () => runLane(lane, fixWave, NO_CONTRACT, phaseTitle)))
   const merged = await merge(`${label} fixes`, results.filter(result => result && result.status === 'ready'), phaseTitle)
   const mergedIds = new Set(merged ? merged.merged : [])
   unmergedFixes.push(...fixLanes.filter(lane => !mergedIds.has(lane.id)).map(lane => lane.id))
@@ -391,9 +426,25 @@ async function fix(label, findings, phaseTitle) {
   return { merged: [...mergedIds], open, head: merged ? merged.head : '' }
 }
 
-const gatePrompt = () =>
+// What the gates can't settle, handed to the wave's reviewers: untested Done-when
+// items, the lanes' own notes, and files they changed outside what they own.
+function handOff(results, contract) {
+  const notes = results.flatMap(result => {
+    const issues = result.issues.join(', ')
+    const outside = result.outside || []
+    return [
+      ...untestableOf(contract, result.id).map(item => `${issues}: no automated test proves this, so check it by hand: ${item}`),
+      ...((result.report && result.report.open) || []).map(item => `${issues}: the lane left a note: ${item}`),
+      ...(outside.length ? [`${issues}: changed files outside its own: ${outside.join(', ')}; check each change is needed`] : []),
+    ]
+  })
+  return notes.length ? `Check these too:\n${list(notes)}` : ''
+}
+
+const gatePrompt = label =>
   [
-    `Run the final gate on ${plan.branch} at its head in ${plan.repo}. Brief: ${plan.brief}. Change nothing; run long suites in the background.`,
+    `Run the final gate on ${plan.branch} at its head. Brief: ${plan.brief}. Change nothing; run long suites in the background.`,
+    `Work in a clean worktree of the head, so the lane worktrees inside the repo stay out of the suites: git -C ${plan.repo} worktree add --detach ${plan.repo}/.claude/worktrees/check-${slug(label)} ${plan.branch}, copy in the local config the brief lists, and remove it when done.`,
     `Report each with exact counts:\n${list(FULL)}`,
     'For each failure: the failing tests, the likely cause and the files involved. A flaky failure counts as a failure; say if it fails near midnight UTC.',
   ].join('\n')
@@ -405,6 +456,7 @@ const reviews = []
 const open = []
 const questions = []
 const unmergedFixes = []
+const untestable = []
 let head = plan.base
 let stopped = ''
 
@@ -434,12 +486,14 @@ for (let i = 0; i < plan.waves.length; i++) {
   for (const result of results) lanes.push({ ...result, merged: mergedIds.has(result.id), wave: w })
   const before = head
   if (merged && merged.head) head = merged.head
+  const landed = results.filter(result => mergedIds.has(result.id))
+  for (const result of landed) untestable.push(...untestableOf(contract, result.id).map(item => `${result.issues.join(', ')}: ${item}`))
 
   const shippedCode = wave.lanes.filter(lane => isCode(lane) && mergedIds.has(lane.id))
   if (shippedCode.length === 0) continue
   phase('Review')
   const scope = list(shippedCode.map(lane => `${lane.issues.join(', ')}: ${lane.doneWhen.join('; ')}`))
-  const findings = await review(`wave ${w}`, `${before}..${head}`, scope, '', shippedCode.some(lane => lane.ui), 'Review')
+  const findings = await review(`wave ${w}`, `${before}..${head}`, scope, handOff(landed, contract), shippedCode.some(lane => lane.ui), 'Review')
   const fixed = await fix(`wave ${w} review`, findings, 'Review')
   if (fixed.head) head = fixed.head
   open.push(...fixed.open)
@@ -450,7 +504,7 @@ phase('Final gate')
 let gate = null
 if (FULL.length === 0) log('The plan lists no checks, so there is no final gate.')
 for (let round = 1; FULL.length > 0 && !stopped; round++) {
-  gate = await call(gatePrompt(), opts('integrator', `gate ${round}`, 'Final gate', GATE))
+  gate = await call(gatePrompt(`gate ${round}`), opts('integrator', `gate ${round}`, 'Final gate', GATE))
   if (gate && gate.head) head = gate.head
   if (!gate || isGreen(gate)) break
   if (round > LIMITS.gateRounds) {
@@ -479,16 +533,17 @@ if (isGreen(gate)) {
   const extra = [
     'Also: check every Done-when item against code and tests; check cross-lane interactions on shared flows; re-run claimed results where cheap.',
     plan.ui ? 'Re-verify every earlier UI finding as fixed, partly or not, with evidence.' : '',
+    untestable.length ? `No automated test proves these, so check each by hand:\n${list(untestable)}` : '',
   ]
     .filter(Boolean)
-    .join(' ')
+    .join('\n')
   const findings = await review('the whole diff', `${plan.base}..${head}`, scope, extra, Boolean(plan.ui), 'Final gate')
   const fixed = await fix('final review', findings, 'Final gate')
   if (fixed.head) head = fixed.head
   open.push(...fixed.open)
   reviews.push({ round: 'final', findings: findings.length, actionable: findings.filter(actionable).length, open: fixed.open.length })
   if (fixed.merged.length) {
-    gate = await call(gatePrompt(), opts('integrator', 'gate after final fixes', 'Final gate', GATE))
+    gate = await call(gatePrompt('gate after final fixes'), opts('integrator', 'gate after final fixes', 'Final gate', GATE))
     if (gate && gate.head) head = gate.head
   }
 }
@@ -528,7 +583,11 @@ return {
     merged: lane.merged,
     attempts: lane.attempts || 0,
     decisions: lane.report ? lane.report.decisions || [] : [],
+    notes: lane.report ? lane.report.open || [] : [],
+    outside: lane.outside || [],
   })),
+  // Done-when items of shipped lanes that no automated test proves: for the PR's manual checks.
+  untestable,
   reviews,
   gate: gate ? { green, checks: gate.checks } : { green: false, checks: [], note: FULL.length ? 'the gate did not run' : 'the plan lists no checks' },
   open: open.map(describe),

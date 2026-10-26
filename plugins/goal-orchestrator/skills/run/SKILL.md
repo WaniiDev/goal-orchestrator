@@ -60,17 +60,17 @@ On every turn of a run (after `/goal` starts one, a compaction, a resume or the 
       "id": "<short-id>", "issues": ["<KEY>"], "doneWhen": ["<testable item>"], "owns": ["<files or dirs>"], "avoid": ["<files>"],
       "db": "<db>", "port": 5174, "e2e": "<filter>", "kind": "code | docs | test", "risk": "high", "ui": true
     }] }],
-    "ui": { "reference": "<design reference>", "standard": "<house design rules>", "sizes": "<sizes and locales>", "areas": [{ "name": "<lists | dialogs | motion>", "db": "<db>", "port": 5181 }] }
+    "ui": { "reference": "<design reference, if any>", "standard": "<house design rules>", "sizes": "<sizes and locales>", "areas": [{ "name": "<lists | dialogs | motion>", "db": "<db>", "port": 5181 }] }
   }
   ```
-  `models` holds the intake's choices. `kind` defaults to `code`; `risk: "high"` (auth, money, data loss, migrations) adds a review before that lane merges; `ui: true` marks lanes the UI audits cover; leave `ui` out for goals without screens. Optional: `limits` (`laneRetries` 2, `gateRounds` 2), `"contract": false` to skip contract tests, `models.integrator`.
+  `models` holds the intake's choices. `kind` defaults to `code`; `risk: "high"` (auth, money, data loss, migrations) adds a review before that lane merges; `ui: true` marks lanes the UI audits cover. Give every goal with screens a `ui`, even with no design reference: leave `reference` out and the auditors check the screen's Done-when items at each size (`sizes` defaults to desktop 1280×720 and phone 390×844). Leave `ui` out only for goals without screens. Optional: `limits` (`laneRetries` 2, `gateRounds` 2), `"contract": false` to skip contract tests, `models.integrator`.
 - In the session's task list: "Ship" (one item; the workflow shows its own progress) and "Deliver".
 
 ## Step 3: Ship
 
 1. Launch `Workflow` with `name: "goal-orchestrator:ship"` and `args`: the plan object itself, not a JSON string. If that name isn't found, pass `scriptPath`: `workflows/ship.js` two folders above this skill's base directory. If the result has `error`, fix the plan and relaunch. Note the `runId` and `transcriptDir` in `RUN.md`.
 2. Per wave, the workflow has failing contract tests written from the Done-when items, runs one implementer per lane in its own worktree, re-runs every claim, sends exact gaps back (at most 2 retries, then the lane is dropped), merges, reviews (UI audits included) and turns findings into fix lanes. Then the final gate, with up to 2 fix rounds, and a whole-diff review. Don't poll it and don't duplicate its work: end your turn with the line `Waiting for the ship workflow.`; the result arrives as a task notification. If anything wakes you before it (a goal check-in, the watchdog), answer with that line again and no tool calls.
-3. Save the result to `reports/ship.json`. Record in `RUN.md` the head, the gate checks, what shipped and what didn't and why; append the lanes' decisions to `DECISIONS.md`.
+3. When the result arrives, first save it verbatim to `reports/ship.json` (the report skill reads it). Then record in `RUN.md` the head, the gate checks, what shipped and what didn't and why, and the `untestable` items; append the lanes' decisions to `DECISIONS.md`.
 4. `questions` (around mode): ask the user, add each answer to its lane as `"answers": [...]`, and relaunch with `resumeFromRunId`; finished agents return their saved results. Relaunch the same way if the run was cut off.
 5. Open security findings are never dropped: fix them, ask (around), or put them first in the PR (away).
 
