@@ -8,10 +8,10 @@ A Claude Code plugin that ships a goal (an issue and its sub-issues, a plan doc,
 2. **Recon and plan.** Reads the repo's steering docs and every issue, then plans waves of lanes that never edit the same files at the same time.
 3. **Ship (a workflow).** The build runs as a dynamic workflow: a program, not a prompt, so retries, gates and stop rules run as code. For each wave:
    - **Contract first.** An agent turns the Done-when items into failing acceptance tests before any feature code exists.
-   - **Lanes.** Implementer agents build in parallel, each in its own worktree from the feature branch, with its own database and port, and make the contract tests pass without editing them.
+   - **Lanes.** Implementer agents build in parallel, each in its own worktree from the feature branch, with its own database and port, and make the contract tests pass without editing them. A lane that needs another lane's work waits and builds again once that one merges.
    - **Re-checked claims.** An integrator re-runs every check a lane reports, compares the counts, and confirms the contract tests are untouched and no lane edited another's files. Gaps go back to the lane, at most twice; then the lane is dropped and the run ends `PARTIAL` instead of looping. High-risk lanes get a review before they merge.
    - **Merge and review.** Ready lanes merge and the fast checks run in a clean worktree. A reviewer (and, for goals with screens, UI auditors with real screenshots) checks the wave and whatever no test can prove, and findings become fix lanes.
-4. **Final gate.** The full suites, up to two fix rounds, then a whole-diff review.
+4. **Final gate.** The full suites, up to two fix rounds, then a whole-diff review that also checks every earlier finding: fixed ones still hold, open ones are reported again or closed.
 5. **Deliver.** The PR with Issues, Decisions, Migrations, Ops notes and Tests; CI driven to green; a merge if you chose it; tracker checkpoints; and your final results.
 
 The ship phase needs dynamic workflows (the `Workflow` tool). Without them, the orchestrator drives the waves itself, as in 1.x.
@@ -27,6 +27,20 @@ At the prompt of a terminal session:
 In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins, Add marketplace with `WaniiDev/goal-orchestrator`, then Add plugin.
 
 To update: `claude plugin update goal-orchestrator@goal-orchestrator-marketplace`, then `/reload-plugins` or a new session. For one session from a clone: `claude --plugin-dir ./plugins/goal-orchestrator`.
+
+### Cloud sessions (claude.ai/code)
+
+Cloud sessions don't load plugins from your machine or from a repository's `.claude/settings.json`. Install the plugin in the cloud environment's **setup script** (environment menu in the session title bar → Edit → Setup script), which runs before Claude starts:
+
+```bash
+#!/bin/bash
+claude plugin marketplace add WaniiDev/goal-orchestrator || true
+claude plugin install goal-orchestrator@goal-orchestrator-marketplace --scope user || true
+```
+
+- New sessions pick it up; running ones don't. The script clones without your credentials, so this repository must stay public.
+- The environment caches the script's result and runs it again only when the script or its allowed hosts change, or after about 7 days. After a release, edit the script (a comment will do) so new sessions get the new version.
+- To try a branch before it reaches `main`, pin it: `claude plugin marketplace add WaniiDev/goal-orchestrator#<branch>`.
 
 ## Use
 

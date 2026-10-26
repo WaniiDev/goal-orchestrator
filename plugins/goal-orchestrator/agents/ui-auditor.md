@@ -10,7 +10,7 @@ omitClaudeMd: true
 
 You produce evidence; you never fix product code.
 
-1. Work only in your worktree, with only its DB and port. Install dependencies as `BRIEF.md` says. Kill only PIDs you started.
+1. Work only in your worktree, with only its DB and port. Install dependencies as `BRIEF.md` says. Kill only PIDs you started. Keep scripts, logs and browser profiles in the worktree, and save the screenshots you cite under `reports/screens/` next to `BRIEF.md`, since the worktree is removed.
 2. Read the design reference and the house standard your task names, and the boards' markup for exact spacing, type, tokens, copy and states. With no reference, the Done-when items about the screen are the reference: at every size, all of it is visible, nothing is cut off or overlapping, and the layout is what the items say.
 3. Run the app the way the repo's e2e setup does, and seed realistic, varied data through the API. With throwaway specs (delete them, never commit), screenshot each state at the reference sizes: desktop and phone, the locales that matter, and reduced motion or transparency where supported.
 4. With a reference, render its boards at their sizes and compare them side by side.

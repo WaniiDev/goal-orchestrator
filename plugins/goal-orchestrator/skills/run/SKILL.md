@@ -47,7 +47,7 @@ On every turn of a run (after `/goal` starts one, a compaction, a resume or the 
 
 ## Step 2: Plan
 
-- A **lane** is one issue (or a tight group) that one implementer owns end to end, with named files. A **wave** is 3–5 lanes with disjoint files. Order by dependency: schema and server before UI, shared primitives before the screens that use them. Docs-only and test-only lanes ride along.
+- A **lane** is one issue (or a tight group) that one implementer owns end to end, with named files. A **wave** is 3–5 lanes with disjoint files. Order by dependency: schema and server before UI, shared primitives before the screens that use them; a lane that needs another lane's code goes in a later wave. Docs-only and test-only lanes ride along.
 - Write `BRIEF.md` from the [template](references/brief-template.md). It is the distilled repo profile that every agent reads instead of the steering docs.
 - Write the plan into `RUN.md` as the workflow's input:
   ```json
@@ -63,16 +63,17 @@ On every turn of a run (after `/goal` starts one, a compaction, a resume or the 
     "ui": { "reference": "<design reference, if any>", "standard": "<house design rules>", "sizes": "<sizes and locales>", "areas": [{ "name": "<lists | dialogs | motion>", "db": "<db>", "port": 5181 }] }
   }
   ```
-  `models` holds the intake's choices. `kind` defaults to `code`; `risk: "high"` (auth, money, data loss, migrations) adds a review before that lane merges; `ui: true` marks lanes the UI audits cover. Give every goal with screens a `ui`, even with no design reference: leave `reference` out and the auditors check the screen's Done-when items at each size (`sizes` defaults to desktop 1280×720 and phone 390×844). Leave `ui` out only for goals without screens. Optional: `limits` (`laneRetries` 2, `gateRounds` 2), `"contract": false` to skip contract tests, `models.integrator`.
+  `models` holds the intake's choices. `kind` defaults to `code`; `risk: "high"` (auth, money, data loss, migrations) adds a review before that lane merges; `ui: true` marks lanes the UI audits cover. Give every goal with screens a `ui`, even with no design reference: leave `reference` out and the auditors check the screen's Done-when items at each size (`sizes` defaults to desktop 1280×720 and phone 390×844). `areas` splits the audits, one auditor per area with its own DB and port; with none, one auditor covers every screen. Leave `ui` out only for goals without screens. Optional: `limits` (`laneRetries` 2, `gateRounds` 2), `"contract": false` to skip contract tests, `models.integrator`.
 - In the session's task list: "Ship" (one item; the workflow shows its own progress) and "Deliver".
 
 ## Step 3: Ship
 
 1. Launch `Workflow` with `name: "goal-orchestrator:ship"` and `args`: the plan object itself, not a JSON string. If that name isn't found, pass `scriptPath`: `workflows/ship.js` two folders above this skill's base directory. If the result has `error`, fix the plan and relaunch. Note the `runId` and `transcriptDir` in `RUN.md`.
-2. Per wave, the workflow has failing contract tests written from the Done-when items, runs one implementer per lane in its own worktree, re-runs every claim, sends exact gaps back (at most 2 retries, then the lane is dropped), merges, reviews (UI audits included) and turns findings into fix lanes. Then the final gate, with up to 2 fix rounds, and a whole-diff review. Don't poll it and don't duplicate its work: end your turn with the line `Waiting for the ship workflow.`; the result arrives as a task notification. If anything wakes you before it (a goal check-in, the watchdog), answer with that line again and no tool calls.
-3. When the result arrives, first save it verbatim to `reports/ship.json` (the report skill reads it). Then record in `RUN.md` the head, the gate checks, what shipped and what didn't and why, and the `untestable` items; append the lanes' decisions to `DECISIONS.md`.
+2. Per wave, the workflow has failing contract tests written from the Done-when items, runs one implementer per lane in its own worktree, re-runs every claim, sends exact gaps back (at most 2 retries, then the lane is dropped), merges (a lane that waited for another lane of its wave builds again once that one merges), reviews (UI audits included) and turns findings into fix lanes. Then the final gate, with up to 2 fix rounds, and a whole-diff review. Don't poll it and don't duplicate its work: end your turn with the line `Waiting for the ship workflow.`; the result arrives as a task notification. If anything wakes you before it (a goal check-in, the watchdog), answer with that line again and no tool calls.
+3. When the result arrives, first save it verbatim to `reports/ship.json` (the report skill reads it). Then record in `RUN.md` the head, the gate checks, what shipped and what didn't and why, and the `untestable` items; append every lane's decisions, fix lanes included, to `DECISIONS.md`.
 4. `questions` (around mode): ask the user, add each answer to its lane as `"answers": [...]`, and relaunch with `resumeFromRunId`; finished agents return their saved results. Relaunch the same way if the run was cut off.
 5. Open security findings are never dropped: fix them, ask (around), or put them first in the PR (away).
+6. One ship run per goal: don't start another for lanes that didn't ship. They go in the PR and the results as not shipped, with the reasons.
 
 Without a `Workflow` tool (workflows off), run [manual waves](references/manual-waves.md) instead.
 
@@ -82,7 +83,7 @@ Follow [delivery](references/delivery.md):
 1. Open the PR (if the finish line includes it): Issues from `shipped`, the gate's checks, the decisions; for `PARTIAL`, a draft PR that lists `notShipped` with the reasons and the open findings.
 2. Drive CI to green, then merge if the finish line says so.
 3. Update the tracker.
-4. Write the final results in the [report](../report/SKILL.md) format.
+4. Read [report](../report/SKILL.md) as a file (only the user can invoke it as a skill) and write the final results in its format.
 5. Clean up: remove the worktrees in the result's `leftover`, delete the `contract-wave-*` branches and the merged `lane-*` ones (`git branch -d` keeps a dropped lane's unmerged work), and stop watching the PR after the merge.
 6. Call `run_finish` last.
 

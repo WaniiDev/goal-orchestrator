@@ -8,10 +8,10 @@ Feature branch: `<feature-branch>`.
 Mode: <away: never ask; decide by issue > plan > design > repo docs/ADRs > smallest safe option, and list decisions | around: stop and report questions that change scope, architecture or data model>.
 
 ## Setup (in your worktree)
-- Install: `<cmd>`
+- Install: `<cmd>`. Add anything it creates that git doesn't ignore to `.git/info/exclude` (a linked `node_modules` slips past a `node_modules/` pattern).
 - DB: set `<DATABASE_URL vars>` to the DB your task names (it ends in `_test`); prepare it with `<cmd>`.
 - Port: `<PORT var>` = the port your task names. Browser: <notes>. Local config to copy and never commit: <files>.
-- Main checkout (merges and the final gate): DB `<db>`, port `<port>`.
+- Merges and the final gate (in clean worktrees of the feature branch): DB `<db>`, port `<port>`.
 
 ## Checks (all of them before you finish)
 - `<typecheck>` · `<typecheck tests>` · `<lint>` · `<unused-code>`

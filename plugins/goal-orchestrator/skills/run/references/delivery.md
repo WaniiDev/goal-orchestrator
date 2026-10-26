@@ -25,9 +25,9 @@ Final gate on `<sha>` (<environment>):
 | Command | Result |
 | --- | --- |
 
-Checked by hand: <each `untestable` item from the ship result and how it was checked, or "None">
+Checked by hand: <each `untestable` item and each lane note (`lanes[].notes`) from the ship result, and how it was checked, or "None">
 
-Reviews: <rounds run; every finding fixed or logged>
+Reviews: <rounds run; every finding fixed or logged, nits (`reviews[].nits`) included>
 ```
 End the body with the session's attribution lines. If the gate runs again after the PR is opened, update the numbers.
 
