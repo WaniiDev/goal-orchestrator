@@ -62,7 +62,7 @@ Headless (`claude -p`): set `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`. Otherwise 
 ## Contents
 
 - `skills/run/`: the method (`SKILL.md`) and its references, each read only at its step: intake, the brief template, delivery, and the manual waves for sessions without workflows (with their review prompts).
-- `workflows/ship.js`: the ship phase. Its input is the plan the run skill writes; it returns the outcome, what shipped and what didn't (and why), the gate's checks, the findings fixed and still open, and decisions.
+- `workflows/ship.js`: the ship phase. Its input is the plan the run skill writes; it returns the outcome, what shipped and what didn't (and why), the gate's checks, the findings fixed and still open, decisions, and the output tokens it spent.
 - `skills/status/`, `skills/report/`: the progress and final-results formats. Only you invoke them, so they add nothing to a session's context until used.
 - `hooks/register.ts` (a Claude Code mod, v2.1.287+): `start_goal` (arms `/goal` after the intake and keeps the finish line in the system prompt and in what a compaction keeps), `run_start` / `run_finish` tools, a progress and budget watchdog (no new commit, repeated failures, time, quiet runs), `/orchestrator-stop`, `/goal clear` on every terminal state, and guards against `pkill`/`killall`, force push and `--no-verify` while a run is active.
 - `agents/implementer.md` (default Sonnet · medium), `agents/reviewer.md` and `agents/ui-auditor.md` (default Opus · xhigh), `agents/integrator.md` (Sonnet · low: re-checks, merges, the gate). Each carries its own rules, so prompts carry only the lane's facts. The intake's choices override the models per run.
@@ -76,3 +76,4 @@ Headless (`claude -p`): set `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`. Otherwise 
 - Agents report schema-checked JSON, so nothing is parsed twice or re-asked. Mechanical re-checks and merges run on Sonnet · low.
 - Docs-only and test-only lanes skip contract tests and review. A blocked lane stops at once instead of retrying.
 - The watchdog stops loops before they burn tokens.
+- Measured: the final results show the ship phase's output tokens, and, in the desktop app, your plan's 5-hour and weekly usage before and after the run and the orchestrator's context size (read with the app's `get_usage` tool; the CLI and cloud sessions don't have it).

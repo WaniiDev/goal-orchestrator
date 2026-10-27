@@ -812,6 +812,8 @@ return {
   security: open.filter(f => f.security === true).map(describe),
   questions,
   stopped,
+  // Output tokens this turn spent, the workflow's agents and the main loop's: what the ship phase cost.
+  tokens: typeof budget !== 'undefined' ? budget.spent() : null,
   // Worktrees of lanes that never merged, fix lanes included, for the main session to remove.
   leftover: lanes.filter(lane => !lane.merged).map(lane => `${plan.repo}/.claude/worktrees/lane-${lane.id}`),
 }

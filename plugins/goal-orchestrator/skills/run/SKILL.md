@@ -21,6 +21,10 @@ Follow [intake](references/intake.md).
 - **Away**: after intake, never ask or wait. Decide by issue text > plan doc > design reference > repo docs and ADRs > smallest safe option; log each decision.
 - **Around**: ask only about scope, architecture, data model or anything destructive; still log decisions.
 
+## Step 0a: Usage at the start
+
+Load `mcp__ccd_session_mgmt__get_usage` with `ToolSearch` (`select:mcp__ccd_session_mgmt__get_usage`) and call it. Write `usage.before` into `RUN.md`: the time, each plan window's label, `percentUsed` and `resetsAt`, and the context's `tokensUsed`. Without the tool (the CLI, a cloud session) or with `plan.status` other than `ok`, write `usage: not measured (<why>)` and go on. Step 4 takes the matching reading.
+
 ## Step 0b: Arm goal mode
 
 Right after the intake (`--auto` included), before recon, so the run can't lose its finish line. Goal mode re-checks the condition after every turn, waits while the workflow runs, and the mod clears it when the run ends.
@@ -71,7 +75,7 @@ On every turn of a run (after `/goal` starts one, a compaction, a resume or the 
 
 1. Launch `Workflow` with `name: "goal-orchestrator:ship"` and `args`: the plan object itself, not a JSON string. If that name isn't found, pass `scriptPath`: `workflows/ship.js` two folders above this skill's base directory. If the result has `error`, fix the plan and relaunch. Note the `runId` and `transcriptDir` in `RUN.md`.
 2. Per wave, the workflow has failing contract tests written from the Done-when items, runs one implementer per lane in its own worktree, re-runs every claim, sends exact gaps back (at most 2 retries, then the lane is dropped), merges (a lane that waited for another lane of its wave builds again once that one merges), reviews (UI audits included) and turns findings into fix lanes. Then the final gate, with up to 2 fix rounds, and a whole-diff review. Don't poll it and don't duplicate its work: end your turn with the line `Waiting for the ship workflow.`; the result arrives as a task notification. If anything wakes you before it (a goal check-in, the watchdog), answer with that line again and no tool calls.
-3. When the result arrives, first save it verbatim to `reports/ship.json` (the report skill reads it). Then add to `RUN.md` (keep the run ID and transcript folder: a resume needs them) the head, the gate checks, what shipped and what didn't and why, the `untestable` items, and the findings fixed (`fixed`) and still open (`open`); append every lane's decisions, fix lanes included, to `DECISIONS.md`.
+3. When the result arrives, first save it verbatim to `reports/ship.json` (the report skill reads it). Then add to `RUN.md` (keep the run ID and transcript folder: a resume needs them) the head, the gate checks, what shipped and what didn't and why, the `untestable` items, and the findings fixed (`fixed`) and still open (`open`), and `tokens`; append every lane's decisions, fix lanes included, to `DECISIONS.md`.
 4. `questions` (around mode): ask the user, add each answer to its lane as `"answers": [...]`, and relaunch with `resumeFromRunId`; finished agents return their saved results. Relaunch the same way if the run was cut off.
 5. Open security findings are never dropped: fix them, ask (around), or put them first in the PR (away).
 6. One ship run per goal: don't start another for lanes that didn't ship. They go in the PR and the results as not shipped, with the reasons.
@@ -84,7 +88,7 @@ Follow [delivery](references/delivery.md):
 1. Open the PR (if the finish line includes it): Issues from `shipped`, the gate's checks, the decisions; for `PARTIAL`, a draft PR that lists `notShipped` with the reasons and the open findings.
 2. Drive CI to green, then merge if the finish line says so.
 3. Update the tracker.
-4. Read [report](../report/SKILL.md) as a file (only the user can invoke it as a skill) and write the final results in its format.
+4. If Step 0a measured usage, call `get_usage` again and write `usage.after` into `RUN.md` the same way. Then read [report](../report/SKILL.md) as a file (only the user can invoke it as a skill) and write the final results in its format.
 5. Clean up: remove the worktrees in the result's `leftover`, delete the `contract-wave-*` branches and the merged `lane-*` ones (`git branch -d` keeps a dropped lane's unmerged work), and stop watching the PR after the merge.
 6. Call `run_finish` last.
 

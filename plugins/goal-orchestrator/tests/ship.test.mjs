@@ -663,7 +663,7 @@ test('docs-only lanes skip the contract and the review', async () => {
 test('a nearly spent token budget stops before the next wave', async () => {
   const waves = [...structuredClone(PLAN.waves), { lanes: [{ id: 'score', issues: ['GAME-3'], doneWhen: ['a line scores 100'], owns: ['src/score.ts'] }] }]
   let merged = false
-  const budget = { total: 1_000_000, spent: () => 0, remaining: () => (merged ? 10_000 : 900_000) }
+  const budget = { total: 1_000_000, spent: () => 990_000, remaining: () => (merged ? 10_000 : 900_000) }
   const { result, labels } = await ship(plan({ waves }), {
     'wave 1 merge': prompt => {
       merged = true
@@ -673,6 +673,7 @@ test('a nearly spent token budget stops before the next wave', async () => {
   assert.ok(!labels.includes('wave 2 contract'))
   assert.ok(!labels.some(label => label.startsWith('gate')))
   assert.match(result.stopped, /before wave 2/)
+  assert.equal(result.tokens, 990_000)
   assert.deepEqual(result.notShipped.map(lane => lane.id), ['score'])
   assert.equal(result.outcome, 'PARTIAL')
 })
