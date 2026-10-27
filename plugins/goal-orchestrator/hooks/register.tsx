@@ -90,26 +90,30 @@ const STALLING = 2 / 3
 
 function duration(ms: number): string {
   const minutes = Math.max(0, Math.round(ms / 60_000))
-  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+  if (minutes < 60) return `${minutes}m`
+  return minutes % 60 === 0 ? `${minutes / 60}h` : `${Math.floor(minutes / 60)}h${minutes % 60}m`
 }
 
+// Numbers, not sentences: ◷ time used of the budget, ↻ calls since the last commit of the limit. The reasons
+// and the summary are in the transcript already.
 export function runView(current: Run, now: number): RunView {
   const { limits, branch } = current
   const elapsed = now - current.startedAt
-  const time = Math.min(1, Math.max(0, elapsed / (limits.maxHours * 3_600_000)))
-  const clock = `${duration(elapsed)} of ${limits.maxHours}h`
+  const budget = limits.maxHours * 3_600_000
+  const time = Math.min(1, Math.max(0, elapsed / budget))
+  const clock = `◷ ${duration(elapsed)}/${duration(budget)}`
+  const calls = `↻ ${current.idleCalls}/${limits.maxIdleCalls}`
   if (current.phase === 'active') {
-    const calls = current.idleCalls === 1 ? '1 call' : `${current.idleCalls} calls`
     const stalling = current.idleCalls / limits.maxIdleCalls >= STALLING
-    return { tone: stalling ? 'stalling' : 'active', label: 'Shipping', branch, detail: `${clock} · ${calls} since a commit`, time }
+    return { tone: stalling ? 'stalling' : 'active', label: 'Shipping', branch, detail: `${clock}  ${calls}`, time }
   }
   if (current.phase === 'wrapup') {
-    return { tone: 'wrapup', label: 'Wrapping up', branch, detail: `${current.reason} · ${current.graceLeft} calls left`, time }
+    return { tone: 'wrapup', label: 'Wrapping up', branch, detail: `${clock}  ${calls}  ${current.graceLeft} left`, time }
   }
   const outcome = current.outcome ?? 'BLOCKED'
   const tone: Tone = outcome === 'DONE' ? 'done' : outcome === 'PARTIAL' ? 'partial' : 'blocked'
   const label = outcome === 'DONE' ? 'Shipped' : outcome === 'PARTIAL' ? 'Partly shipped' : 'Blocked'
-  return { tone, label, branch, detail: current.summary, time }
+  return { tone, label, branch, detail: `◷ ${duration(elapsed)}`, time }
 }
 
 // One thin ring, the time budget, that fills clockwise; it ends as a filled dot with a mark.
@@ -498,7 +502,7 @@ export const register: Register = on => {
     const line = (
       <Text wrap="truncate-end">
         <Text color={color} weight="medium">{view.label}</Text> <Text mono>{view.branch}</Text>
-        <Text dimColor tabular> · {view.detail}</Text>
+        <Text dimColor tabular>{'   '}{view.detail}</Text>
       </Text>
     )
     if (e.surface === 'terminal') {
@@ -512,7 +516,7 @@ export const register: Register = on => {
     const { Svg } = $.ui.resolve(e)
     return (
       <Box flexDirection="row" alignItems="center" gap="sm">
-        <Svg source={ringSvg(view)} alt={`${view.label} ${view.branch}: ${view.detail}`} width={18} height={18} />
+        <Svg source={ringSvg(view)} alt={`${view.label} ${view.branch}, ${Math.round(view.time * 100)}% of the time budget used`} width={18} height={18} />
         {line}
       </Box>
     )

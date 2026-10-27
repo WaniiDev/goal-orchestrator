@@ -267,7 +267,7 @@ describe('goal-orchestrator goal mode', () => {
 
     const desktop = await $.ui.mount({ ...BAND, surface: 'desktop' })
     expect((await desktop.find({ type: 'Text', text: /^Shipping$/ }))?.props.color).toBe('claude')
-    expect((await desktop.find({ type: 'Text', text: /since a commit/ }))?.text).toBe('Shipping feat/x · 30m of 8h · 0 calls since a commit')
+    expect((await desktop.find({ type: 'Text', text: /↻/ }))?.text).toBe('Shipping feat/x   ◷ 30m/8h  ↻ 0/60')
     expect(String((await desktop.find({ type: 'Svg' }))?.props.source)).toContain('stroke-dasharray')
     await desktop.unmount()
 
