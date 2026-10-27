@@ -16,11 +16,12 @@ Read `RUN.md` (the `results:` line), `DECISIONS.md`, `reports/ship.json` (the wo
 - ✅ typecheck, lint, unused code
 - ✅ unit + integration: <n> pass, 0 fail · e2e: <n> passed · CI: <checks>
 **Reviews**
-- ✅ <n> rounds; <n> findings fixed, <n> logged as decisions
+- ✅ <n> rounds; <n> findings fixed (`fixed`), <n> open (`open`), <n> nits (`reviews[].nits`)
 **Decisions** (top 3–5; full list in the PR)
 - <decision>
 
 ⚠️ <follow-ups, unresolved flaky tests, anything the user must do>
 ```
+Every ✅ stands on a result in `reports/ship.json` or the PR's checks; a check that didn't run, or a claim nobody re-checked, is ⚠️ with the reason.
 
 **page**: make a private Artifact titled "<goal> results", following the Artifact tool's own steps (quickstart first), with these sections: Outcome (status, PR link, merge SHA), What shipped (per issue), Decisions (grouped), Checks (exact commands and counts), Reviews (counts per round, notable fixes), Evidence (screenshots and timings, if any), Follow-ups.

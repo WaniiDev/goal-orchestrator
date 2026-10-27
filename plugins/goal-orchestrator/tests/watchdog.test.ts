@@ -1,11 +1,12 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import type { On, SessionMessage } from 'claude-code'
 
 const START = 'mcp__goal-orchestrator__run_start'
 const FINISH = 'mcp__goal-orchestrator__run_finish'
 const START_GOAL = 'mcp__goal-orchestrator__start_goal'
 const COMPOSE = { model: 'claude-sonnet-5-5', promptModel: 'claude-sonnet-5-5', surfaces: [], tools: [], outputStyle: null, traits: [] } as const
+const TRANSCRIPT: SessionMessage[] = [{ role: 'user', text: 'ship WAN-1', toolUses: [] }]
 const CONDITION = 'goal-orchestrator run for WAN-1. Met when the latest reply ends with a line starting "GOAL: DONE", "GOAL: PARTIAL" or "GOAL: BLOCKED".'
 
 type World = { heads: string[]; goals: string[]; goalClears: number; prompts: string[]; toasts: string[]; failing: Set<string> }
@@ -204,6 +205,29 @@ describe('goal-orchestrator goal mode', () => {
     expect(section?.text).toContain('/state/RUN.md')
     await $.command.run({ command: 'goal', args: 'clear' } as never)
     expect((await $.prompt.compose(COMPOSE as never)).sections).toEqual([])
+  })
+
+  test("a compaction keeps the finish line in the main conversation's summary only", async ($, on) => {
+    const clock = mock.clock(on)
+    world(on)
+    const told: (string | undefined)[] = []
+    on('session.compact', ($, e) => {
+      told.push(e.instructions)
+      return { messages: e.messages }
+    })
+    await $.session.compact({ trigger: 'auto', messages: TRANSCRIPT })
+    await $.tool.call({ tool: START_GOAL, condition: CONDITION, run_file: '/state/RUN.md' } as never)
+    await clock.advance(1)
+    await $.session.compact({ trigger: 'manual', instructions: 'keep the API notes', messages: TRANSCRIPT })
+    await $.session.compact({ trigger: 'auto', agentId: 'lane-a', messages: TRANSCRIPT })
+    await $.command.run({ command: 'goal', args: 'clear' } as never)
+    await $.session.compact({ trigger: 'auto', messages: TRANSCRIPT })
+    expect(told[0]).toBeUndefined()
+    expect(told[1]).toMatch(/^keep the API notes\n\nKeep this in the summary, word for word:\n/)
+    expect(told[1]).toContain(CONDITION)
+    expect(told[1]).toContain('/state/RUN.md')
+    expect(told[2]).toBeUndefined()
+    expect(told[3]).toBeUndefined()
   })
 
   test('start_goal refuses an empty or oversized condition and queues nothing', async ($, on) => {

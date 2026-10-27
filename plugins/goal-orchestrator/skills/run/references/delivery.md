@@ -27,9 +27,9 @@ Final gate on `<sha>` (<environment>):
 
 Checked by hand: <each `untestable` item and each lane note (`lanes[].notes`) from the ship result, and how it was checked, or "None">
 
-Reviews: <rounds run; every finding fixed or logged, nits (`reviews[].nits`) included>
+Reviews: <rounds run; the findings fixed (`fixed`); each finding still open (`open`) and each nit (`reviews[].nits`), with why it stays>
 ```
-End the body with the session's attribution lines. If the gate runs again after the PR is opened, update the numbers.
+Lane notes and nits are as of their lane or round, and a later fix may have closed them: check each against the final head and leave out what no longer holds. End the body with the session's attribution lines. If the gate runs again after the PR is opened, update the numbers.
 
 ## Drive to green
 - Watch the PR with the session's own PR tools (in the desktop app, `ccd_pr`); never poll with sleep or a timer.

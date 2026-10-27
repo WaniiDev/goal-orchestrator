@@ -112,30 +112,46 @@ const verifySchema = files => ({
   ...VERIFY,
   properties: { ...VERIFY.properties, contract: { ...VERIFY.properties.contract, minItems: files.length, maxItems: files.length } },
 })
-const CONTRACT = {
+// One entry per lane, under its lane id: a writer can't file a lane's tests under an issue key,
+// and an untestable entry must be one of that lane's Done-when items.
+const contractSchema = lanes => ({
   type: 'object',
   required: ['sha', 'lanes'],
   properties: {
     sha: { type: 'string', pattern: SHA_OR_EMPTY, description: 'the commit that adds the contract tests (empty if no item can be tested)' },
     lanes: {
-      type: 'array',
-      items: {
-        type: 'object',
-        required: ['id', 'files', 'untestable'],
-        properties: {
-          id: { type: 'string' },
-          files: { type: 'array', items: { type: 'string' } },
-          untestable: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Done-when items no automated test can prove, each with why; nothing else',
+      type: 'object',
+      description: 'one entry per lane, under its lane id',
+      required: lanes.map(lane => lane.id),
+      additionalProperties: false,
+      properties: Object.fromEntries(
+        lanes.map(lane => [
+          lane.id,
+          {
+            type: 'object',
+            required: ['files', 'untestable'],
+            properties: {
+              files: { type: 'array', items: { type: 'string' } },
+              untestable: {
+                type: 'array',
+                description: 'the Done-when items no automated test can prove, each with why; nothing else',
+                items: {
+                  type: 'object',
+                  required: ['item', 'why'],
+                  properties: {
+                    item: lane.doneWhen.length ? { type: 'string', enum: [...new Set(lane.doneWhen)] } : { type: 'string' },
+                    why: { type: 'string' },
+                  },
+                },
+              },
+              notes: { type: 'array', items: { type: 'string' }, description: 'anything else the lane should know, such as the API the tests expect' },
+            },
           },
-          notes: { type: 'array', items: { type: 'string' }, description: 'anything else the lane should know, such as the API the tests expect' },
-        },
-      },
+        ]),
+      ),
     },
   },
-}
+})
 const FINDINGS = {
   type: 'object',
   required: ['findings'],
@@ -218,10 +234,10 @@ const normal = path => {
   const relative = path.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '')
   return relative.toLowerCase().startsWith(REPO.toLowerCase()) ? relative.slice(REPO.length) : relative
 }
-// owns lists files or directories.
+// owns lists files or directories; a file's own tests count as the file's.
 const ownsFile = (lane, file) => {
   const path = normal(file)
-  return lane.owns.map(normal).some(entry => path === entry || path.startsWith(`${entry}/`))
+  return lane.owns.map(normal).some(entry => path === entry || path.startsWith(`${entry}/`) || unitOf(path) === unitOf(entry))
 }
 // A source file and its tests are one unit: a fix to one often needs the other.
 const unitOf = file => normal(file).replace(/\.(contract\.)?(test|spec)(?=\.[^./]+$)/, '')
@@ -264,14 +280,32 @@ async function writeContract(wave, w) {
   const contract = await call(
     [
       `Write the acceptance contract for wave ${w}. ${WHERE}`,
-      `Work in a throwaway worktree: git -C ${plan.repo} worktree add -b ${branch} ${tree} ${plan.branch} (if branch ${branch} already exists from an earlier attempt, add the worktree on it and check what it holds). For each Done-when item below that an automated test can prove, write a failing acceptance test in the repo's test layout, in new files of each lane's own, named so the lane's own test files stay free (for example <module>.contract.test.ts). Write them as ordinary tests: import what the lane will create the way the code will use it, with no dynamic imports, type copies or any-casts to get around the missing code. Run them and confirm each fails only because the feature is missing: a missing module or export counts; a syntax, type or config error in the tests themselves doesn't. Write no feature code and change no config. List every item you can't test as untestable, with why, and put anything else the lane should know (the API the tests expect, the setup they need) in notes.`,
+      `Work in a throwaway worktree: git -C ${plan.repo} worktree add -b ${branch} ${tree} ${plan.branch} (if branch ${branch} already exists from an earlier attempt, add the worktree on it and check what it holds). For each Done-when item below that an automated test can prove, write a failing acceptance test in the repo's test layout, in new files of each lane's own, named so the lane's own test files stay free (for example <module>.contract.test.ts). Write them as ordinary tests: import what the lane will create the way the code will use it, with no dynamic imports, type copies or any-casts to get around the missing code. Import only the lane's own files and code already on the branch, and build by hand any state another lane's code would make, so no lane waits for another. Run them and confirm each fails only because the feature is missing: a missing module or export counts; a syntax, type or config error in the tests themselves doesn't. Write no feature code and change no config. List every item you can't test as untestable, with why, and put anything else the lane should know (the API the tests expect, the setup they need) in notes.`,
       `Commit the tests on ${branch} as one commit in the brief's format ("Add acceptance tests for wave ${w}"). Don't push. Remove the worktree and keep the branch: each lane brings in only its own tests, so a lane that doesn't ship leaves no failing tests behind.`,
+      `Report each lane under its lane id (the word after "Lane"), not its issue keys.`,
       ...lanes.map(lane => `Lane ${lane.id} (${lane.issues.join(', ')}), will own ${lane.owns.join(', ')}:\n${list(lane.doneWhen)}`),
     ].join('\n\n'),
-    opts('implementer', `wave ${w} contract`, 'Contract', CONTRACT),
+    opts('implementer', `wave ${w} contract`, 'Contract', contractSchema(lanes)),
   )
-  if (!contract) log(`Wave ${w}: the contract could not be written; its lanes run without one.`)
-  return contract || NO_CONTRACT
+  if (!contract) {
+    log(`Wave ${w}: the contract could not be written; its lanes run without one.`)
+    return NO_CONTRACT
+  }
+  // Back to a list of entries by lane id, the shape the rest of the run reads.
+  const entries = contract.lanes || {}
+  const missing = lanes.filter(lane => !entries[lane.id]).map(lane => lane.id)
+  if (missing.length) log(`Wave ${w}: the contract has no entry for ${missing.join(', ')}; those lanes run without contract tests.`)
+  return {
+    sha: contract.sha,
+    lanes: lanes
+      .filter(lane => entries[lane.id])
+      .map(lane => ({
+        id: lane.id,
+        files: entries[lane.id].files || [],
+        untestable: (entries[lane.id].untestable || []).map(entry => `${entry.item} (${entry.why})`),
+        notes: entries[lane.id].notes || [],
+      })),
+  }
 }
 
 function checkPrompt(lane, tree, files, contract, report) {
@@ -343,9 +377,11 @@ async function runLane(lane, wave, contract, phaseTitle = 'Build', after = []) {
   const task = [
     `Lane ${lane.id}: ${lane.issues.join(', ')}. ${WHERE}`,
     `Worktree ${tree}, branch lane-${lane.id}. If it doesn't exist yet, create it: git -C ${plan.repo} worktree add -b lane-${lane.id} ${tree} ${plan.branch} (or, if branch lane-${lane.id} already exists, git -C ${plan.repo} worktree add ${tree} lane-${lane.id}).`,
-    after.length ? `Since you started, ${after.join(', ')} merged into ${plan.branch}: first bring that in with git merge ${plan.branch}.` : '',
+    after.length
+      ? `Since you started, ${after.join(', ')} merged into ${plan.branch}: first bring that in with git merge ${plan.branch}, its message in the brief's format.`
+      : '',
     `Done when:\n${list(lane.doneWhen)}`,
-    (lane.owns.length ? `Own: ${lane.owns.join(', ')}.` : 'Own: only the files this fix needs.') +
+    (lane.owns.length ? `Own: ${lane.owns.join(', ')}, with their tests.` : 'Own: only the files this fix needs.') +
       (lane.avoid && lane.avoid.length ? ` Don't touch: ${lane.avoid.join(', ')}.` : ''),
     others.length
       ? `Building alongside you: ${others.map(other => (other.owns.length ? `${other.id} (${other.owns.join(', ')})` : other.id)).join('; ')}. If you can't finish without one of them, report blocked with its id in needs.`
@@ -354,7 +390,7 @@ async function runLane(lane, wave, contract, phaseTitle = 'Build', after = []) {
     lane.e2e ? `e2e filter: ${lane.e2e}` : '',
     isCode(lane) && CHECKS.fast.length ? `Report at least these checks: ${CHECKS.fast.join(' · ')}.` : '',
     files.length
-      ? `Contract tests: unless your branch already has them, first bring in your own with git checkout ${contract.sha} -- ${files.join(' ')} and commit them ("Add acceptance tests for ${lane.issues.join(', ')}"). Make them pass and never edit them.`
+      ? `Contract tests: unless your branch already has them, first bring in your own with git checkout ${contract.sha} -- ${files.join(' ')} and commit them in the brief's format ("Add acceptance tests for ${lane.issues.join(', ')}"). Make them pass and never edit them.`
       : '',
     tests && (tests.notes || []).length ? `From the contract's writer:\n${list(tests.notes)}` : '',
     lane.answers && lane.answers.length ? `The user's answers:\n${list(lane.answers)}` : '',
@@ -399,7 +435,8 @@ async function runLane(lane, wave, contract, phaseTitle = 'Build', after = []) {
       premerge = found.filter(finding => !blocking(finding))
     }
     if (gaps.length === 0) {
-      return { id: lane.id, issues: lane.issues, status: 'ready', report, outside: check.outsideFiles || [], premerge, attempts: attempt }
+      const outside = (check.outsideFiles || []).filter(file => !ownsFile(lane, file))
+      return { id: lane.id, issues: lane.issues, status: 'ready', report, outside, premerge, attempts: attempt }
     }
     if (attempt > LIMITS.laneRetries) {
       log(`Lane ${lane.id} dropped after ${attempt} attempts: ${gaps[0]}`)
@@ -468,8 +505,13 @@ async function buildAndMerge(label, wave, contract, buildPhase, mergePhase) {
     const again = await parallel(
       unblocked.map(result => () => runLane(wave.lanes.find(lane => lane.id === result.id), wave, contract, buildPhase, result.needs)),
     )
+    // The first attempt's decisions still describe the lane's work.
+    const withEarlier = (first, second) =>
+      second && second.report && first.report
+        ? { ...second, report: { ...second.report, decisions: [...(first.report.decisions || []), ...(second.report.decisions || [])] } }
+        : second
     unblocked.forEach((result, k) => {
-      results[results.indexOf(result)] = again[k] || crashed(result)
+      results[results.indexOf(result)] = withEarlier(result, again[k]) || crashed(result)
     })
     await land(`${label} second pass`, again.filter(result => result && result.status === 'ready'))
   }
@@ -562,9 +604,11 @@ async function fix(label, findings, phaseTitle) {
   const fixLanes = Array.from({ length: count }, (_, i) => {
     const items = groups.filter((_, j) => j % count === i).flatMap(group => group.findings)
     const owns = [...new Set(items.flatMap(filesOf).map(normal))]
+    // Its commits name the issues of the planned lanes whose files it changes.
+    const issues = [...new Set(planned.filter(lane => owns.some(file => ownsFile(lane, file))).flatMap(lane => lane.issues))]
     return {
       id: `${slug(label)}-fix${i + 1}`,
-      issues: [`${label} findings`],
+      issues: issues.length ? issues : [`${label} findings`],
       kind: owns.every(file => DOCS.test(file)) ? 'docs' : 'code',
       doneWhen: items.map(describe),
       owns,
@@ -686,6 +730,7 @@ for (let round = 1; FULL.length > 0 && !stopped; round++) {
   }))
   const fixed = await fix(`gate ${round}`, failures, 'Final gate')
   if (fixed.head) head = fixed.head
+  closed.push(...fixed.closed)
   if (fixed.merged.length === 0) {
     open.push(...fixed.open)
     log('Final gate: no fix merged, so the gate stops here.')
@@ -700,12 +745,15 @@ if (isGreen(gate)) {
     closed.length ? `Earlier rounds fixed these; check each fix holds:\n${list(closed.map(describe))}` : '',
     open.length ? `Earlier rounds left these open; report each one that still holds again:\n${list(open.map(describe))}` : '',
     untestable.length ? `No automated test proves these, so check each by hand:\n${list(untestable)}` : '',
+    // No wave review saw what the fix lanes left: their notes and their edits outside what they own.
+    handOff(lanes.filter(lane => lane.merged && !planned.some(entry => entry.id === lane.id)), NO_CONTRACT),
   ]
     .filter(Boolean)
     .join('\n')
   const final = await review('the whole diff', `${plan.base}..${head}`, scope, extra, Boolean(plan.ui), 'Final gate')
   const fixed = await fix('final review', final.findings, 'Final gate')
   if (fixed.head) head = fixed.head
+  closed.push(...fixed.closed)
   // The whole-diff review judged every earlier open finding again, so what it leaves open replaces them.
   if (final.complete) open.length = 0
   open.push(...fixed.open)
@@ -758,6 +806,8 @@ return {
   untestable,
   reviews,
   gate: gate ? { green, checks: gate.checks } : { green: false, checks: [], note: FULL.length ? 'the gate did not run' : 'the plan lists no checks' },
+  // Findings whose fix lanes merged, every round's; nits get no fix lane, so they are in reviews.
+  fixed: closed.map(describe),
   open: open.map(describe),
   security: open.filter(f => f.security === true).map(describe),
   questions,

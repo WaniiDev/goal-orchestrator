@@ -219,7 +219,7 @@ function finishLine(goal: ActiveGoal): string {
     'A goal-orchestrator run is active in this session, in goal mode.',
     `Its finish line (the /goal condition): ${goal.condition}`,
     `Its state is in ${goal.runFile || 'RUN.md in the scratchpad'}: re-read it before acting after a compaction or a resume, then continue the goal-orchestrator:run skill from the step it records.`,
-    'If `/goal` reports the goal achieved or cleared, this section no longer applies.',
+    'If `/goal` reports the goal achieved or cleared, this no longer applies.',
   ].join('\n')
 }
 
@@ -287,6 +287,15 @@ export const register: Register = on => {
     if (goal === null) return composed
     return { ...composed, sections: [...composed.sections, { id: 'goal-orchestrator:finish-line', text: finishLine(goal), scope: 'session' }] }
   })
+
+  // Some surfaces put session sections in the first message, which a compaction summarizes away: the summary
+  // keeps the finish line too. A subagent's compaction is its own.
+  on('session.compact', async ($, e, next) => {
+    const goal = e.agentId === undefined ? ((await $.state.get(GOAL)).value ?? null) : null
+    if (goal === null) return next(e)
+    const keep = `Keep this in the summary, word for word:\n${finishLine(goal)}`
+    return next({ ...e, instructions: e.instructions ? `${e.instructions}\n\n${keep}` : keep })
+  }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: START }, async ($, e) => {
     const input = e as unknown as Record<string, unknown>

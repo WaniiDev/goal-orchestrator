@@ -20,7 +20,7 @@ When a lane reports:
 
 Skip docs-only and test-only waves. Otherwise launch `goal-orchestrator:reviewer` (model and effort from `RUN.md`) in a fresh worktree on the feature head, with the wave prompt from [review prompts](review-brief.md). For UI work, also launch one `goal-orchestrator:ui-auditor` per area (lists, dialogs and drawers, motion), each with its own DB and port.
 
-Save the findings to `reports/`. Turn must-fix and should-fix findings into fix lanes grouped by file, with a source file and its tests in one lane. For each finding you drop, log the reason in `DECISIONS.md`. Re-review only the areas a large fix touched.
+Save the findings to `reports/`. Turn must-fix and should-fix findings into fix lanes grouped by file, with a source file and its tests in one lane; a fix lane's commits name the issues whose files it changes. For each finding you drop, log the reason in `DECISIONS.md`. Re-review only the areas a large fix touched.
 
 ## Final gate
 

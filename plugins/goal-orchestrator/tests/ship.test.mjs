@@ -56,7 +56,8 @@ const failing = counts => prompt => checked(prompt, { checks: [{ ...OK, pass: fa
 // What a well-behaved agent returns, by the label the workflow gives it.
 function standard(label, prompt) {
   if (label.endsWith(' contract')) {
-    return { sha: 'contract-sha', lanes: matches(prompt, /^Lane (\S+) \(/gm).map(id => ({ id, files: [`tests/${id}.test.ts`], untestable: [] })) }
+    const ids = matches(prompt, /^Lane (\S+) \(/gm)
+    return { sha: 'contract-sha', lanes: Object.fromEntries(ids.map(id => [id, { files: [`tests/${id}.test.ts`], untestable: [] }])) }
   }
   if (/ (build|build again|fix \d+)$/.test(label)) {
     const items = listAfter(prompt, 'Done when:')
@@ -188,20 +189,20 @@ test('untested Done-when items, lane notes and outside edits reach the reviewers
   const { result, prompt } = await ship(plan(), {
     'wave 1 contract': {
       sha: 'contract-sha',
-      lanes: [
-        { id: 'board', files: ['tests/board.test.ts'], untestable: ['the board fits a 1280x720 window: needs a real browser'] },
-        { id: 'input', files: ['tests/input.test.ts'], untestable: [] },
-      ],
+      lanes: {
+        board: { files: ['tests/board.test.ts'], untestable: [{ item: 'the board is 10x20', why: 'it is measured in a real browser' }] },
+        input: { files: ['tests/input.test.ts'], untestable: [] },
+      },
     },
     'board build': prompt => ({ ...standard('board build', prompt), open: ['the HUD layout needs the renderer'] }),
     'board check': prompt => checked(prompt, { outsideFiles: ['tsconfig.json'] }),
   })
   const review = prompt('wave 1 review')
-  assert.match(review, /GAME-1: no automated test proves this, so check it by hand: the board fits a 1280x720 window/)
+  assert.match(review, /GAME-1: no automated test proves this, so check it by hand: the board is 10x20 \(it is measured in a real browser\)/)
   assert.match(review, /GAME-1: the lane left a note: the HUD layout needs the renderer/)
   assert.match(review, /GAME-1: changed files outside its own: tsconfig\.json/)
-  assert.match(prompt('the whole diff review'), /check each by hand:\n- GAME-1: the board fits a 1280x720 window/)
-  assert.deepEqual(result.untestable, ['GAME-1: the board fits a 1280x720 window: needs a real browser'])
+  assert.match(prompt('the whole diff review'), /check each by hand:\n- GAME-1: the board is 10x20 \(it is measured in a real browser\)/)
+  assert.deepEqual(result.untestable, ['GAME-1: the board is 10x20 (it is measured in a real browser)'])
   const board = result.lanes.find(lane => lane.id === 'board')
   assert.deepEqual([board.notes, board.outside], [['the HUD layout needs the renderer'], ['tsconfig.json']])
   assert.equal(result.outcome, 'DONE')
@@ -211,16 +212,38 @@ test("the contract writer's notes reach the lane, not the list of items to check
   const { result, prompt } = await ship(plan(), {
     'wave 1 contract': {
       sha: 'contract-sha',
-      lanes: [
-        { id: 'board', files: ['tests/board.contract.test.ts'], untestable: [], notes: ['the tests expect createBoard(rows, cols)'] },
-        { id: 'input', files: ['tests/input.contract.test.ts'], untestable: [] },
-      ],
+      lanes: {
+        board: { files: ['tests/board.contract.test.ts'], untestable: [], notes: ['the tests expect createBoard(rows, cols)'] },
+        input: { files: ['tests/input.contract.test.ts'], untestable: [] },
+      },
     },
   })
   assert.match(prompt('board build'), /From the contract's writer:\n- the tests expect createBoard\(rows, cols\)/)
   assert.doesNotMatch(prompt('input build'), /contract's writer/)
   assert.doesNotMatch(prompt('wave 1 review'), /createBoard/)
   assert.deepEqual(result.untestable, [])
+  assert.equal(result.outcome, 'DONE')
+})
+
+test("the contract is keyed by lane id, and an untestable entry must be one of that lane's Done-when items", async () => {
+  const { calls, prompt } = await ship(plan())
+  const { lanes } = calls.find(call => call.label === 'wave 1 contract').schema.properties
+  assert.deepEqual([lanes.type, lanes.required, lanes.additionalProperties], ['object', ['board', 'input'], false])
+  const items = id => lanes.properties[id].properties.untestable.items.properties.item.enum
+  assert.deepEqual(items('board'), ['the board is 10x20', 'a piece falls a row per tick'])
+  assert.deepEqual(items('input'), ['arrow keys move the piece'])
+  assert.match(prompt('wave 1 contract'), /Report each lane under its lane id \(the word after "Lane"\), not its issue keys\./)
+  assert.match(prompt('wave 1 contract'), /Import only the lane's own files and code already on the branch, and build by hand any state another lane's code would make/)
+})
+
+test('a lane the contract has no entry for is logged and builds without contract tests', async () => {
+  const { result, logs, prompt } = await ship(plan(), {
+    'wave 1 contract': { sha: 'contract-sha', lanes: { board: { files: ['tests/board.test.ts'], untestable: [] } } },
+  })
+  assert.ok(logs.includes('Wave 1: the contract has no entry for input; those lanes run without contract tests.'))
+  assert.match(prompt('board build'), /git checkout contract-sha -- tests\/board\.test\.ts/)
+  assert.doesNotMatch(prompt('input build'), /Contract tests:/)
+  assert.match(prompt('input check'), /contract: \[\] \(this lane has no contract tests\)\./)
   assert.equal(result.outcome, 'DONE')
 })
 
@@ -312,6 +335,16 @@ test('an edit inside a directory another lane owns blocks the merge', async () =
   assert.doesNotMatch(prompt('board fix 1'), /edited tests\/board\.test\.ts/)
 })
 
+test("a lane's own tests count as its own, and another lane's tests as that lane's", async () => {
+  const { result, prompt } = await ship(plan(), {
+    'board check': (prompt, nth) => checked(prompt, { outsideFiles: nth === 1 ? ['src/board.test.ts', 'src/input.spec.ts'] : ['src/board.test.ts'] }),
+  })
+  assert.match(prompt('board build'), /\nOwn: src\/board\.ts, with their tests\./)
+  assert.match(prompt('board fix 1'), /edited src\/input\.spec\.ts, which lane input owns/)
+  assert.doesNotMatch(prompt('board fix 1'), /edited src\/board\.test\.ts/)
+  assert.deepEqual(result.lanes.find(lane => lane.id === 'board').outside, [])
+})
+
 test('a report that already shows a gap goes back to the lane without a re-check', async () => {
   const { labels, prompt } = await ship(plan(), {
     'board build': prompt => ({ ...standard('board build', prompt), checks: [{ ...OK, pass: false, counts: '1 failed' }] }),
@@ -366,7 +399,7 @@ test('a lane that needs another lane of its wave builds again once that one merg
   const waits = { status: 'blocked', sha: '', files: [], doneWhen: [], checks: [], open: ['needs the board API'], needs: ['board'] }
   const { result, labels, prompt } = await ship(plan(), { 'input build': waits })
   assert.ok(labels.indexOf('input build again') > labels.indexOf('wave 1 merge'))
-  assert.match(prompt('input build again'), /Since you started, board merged into feat\/game: first bring that in with git merge feat\/game\./)
+  assert.match(prompt('input build again'), /Since you started, board merged into feat\/game: first bring that in with git merge feat\/game, its message in the brief's format\./)
   assert.doesNotMatch(prompt('wave 1 merge'), /lane-input/)
   assert.match(prompt('wave 1 second pass merge'), /lane-input/)
   assert.deepEqual(result.shipped.map(lane => lane.id), ['board', 'input'])
@@ -378,6 +411,16 @@ test('a lane that needs another lane of its wave builds again once that one merg
   })
   assert.ok(!stuck.labels.includes('input build again'))
   assert.equal(stuck.result.notShipped.find(lane => lane.id === 'input').why, "it waited for board, which didn't merge")
+})
+
+test("a lane that builds again keeps its first attempt's decisions, not its notes about waiting", async () => {
+  const waits = { status: 'blocked', sha: '', files: [], doneWhen: [], checks: [], decisions: ['keys repeat after 150 ms'], open: ['needs the board API'], needs: ['board'] }
+  const { result } = await ship(plan(), {
+    'input build': waits,
+    'input build again': prompt => ({ ...standard('input build again', prompt), decisions: ['moves go through board.move()'] }),
+  })
+  const input = result.lanes.find(lane => lane.id === 'input')
+  assert.deepEqual([input.decisions, input.notes], [['keys repeat after 150 ms', 'moves go through board.move()'], []])
 })
 
 test('lanes merged under their branch names or bare ids both count as merged', async () => {
@@ -446,13 +489,23 @@ test('a source file and its tests go to one fix lane, which owns every file its 
   ]
   const { labels, prompt } = await ship(plan(), { 'wave 1 review': { findings } })
   assert.deepEqual(fixBuilds(labels), ['wave-1-review-fix1 build', 'wave-1-review-fix2 build'])
-  assert.match(prompt('wave-1-review-fix1 build'), /\nOwn: src\/render\.ts, src\/hud\.ts, src\/render\.test\.ts, src\/hud\.spec\.ts\./)
-  assert.match(prompt('wave-1-review-fix2 build'), /\nOwn: src\/input\.ts\./)
+  assert.match(prompt('wave-1-review-fix1 build'), /\nOwn: src\/render\.ts, src\/hud\.ts, src\/render\.test\.ts, src\/hud\.spec\.ts, with their tests\./)
+  assert.match(prompt('wave-1-review-fix2 build'), /\nOwn: src\/input\.ts, with their tests\./)
 
   // A finding that spans two groups joins them.
   const spans = { severity: 'should', file: 'src/input.test.ts', files: ['src/input.test.ts', 'src/hud.ts'], problem: 'p', fix: 'f' }
   const joined = await ship(plan(), { 'wave 1 review': { findings: [...findings, spans] } })
   assert.deepEqual(fixBuilds(joined.labels), ['wave-1-review-fix1 build'])
+})
+
+test('a fix lane names the issues of the lanes whose files it changes', async () => {
+  const findings = [
+    { severity: 'should', file: 'src/board.test.ts', problem: 'the test pins a 9-row board', fix: 'expect 20 rows' },
+    { severity: 'should', file: 'docs/notes.md', problem: 'the notes are stale', fix: 'update them' },
+  ]
+  const { prompt } = await ship(plan(), { 'wave 1 review': { findings } })
+  assert.match(prompt('wave-1-review-fix1 build'), /^Lane wave-1-review-fix1: GAME-1\./)
+  assert.match(prompt('wave-1-review-fix2 build'), /^Lane wave-1-review-fix2: wave 1 review findings\./)
 })
 
 test('a fix lane that only touches docs needs no checks', async () => {
@@ -516,6 +569,36 @@ test('a finding left open goes to the final review, which decides whether it sti
   const blind = await ship(plan({ waves, ui: { areas: [{ name: 'board' }] } }), { ...overrides, 'the whole diff audit board': null })
   assert.deepEqual(blind.result.open, ['must src/board.ts — rows never clear — fix: scan every row'])
   assert.equal(blind.result.outcome, 'PARTIAL')
+})
+
+test("fix lanes' notes and edits outside their files reach the final review", async () => {
+  const finding = { severity: 'should', file: 'src/board.ts', problem: 'step() is not pure', fix: 'copy the queue' }
+  const { prompt } = await ship(plan(), {
+    'wave 1 review': { findings: [finding] },
+    'wave-1-review-fix1 build': prompt => ({ ...standard('wave-1-review-fix1 build', prompt), open: ['the HUD reads the queue too'] }),
+    'wave-1-review-fix1 check': prompt => checked(prompt, { outsideFiles: ['src/hud.ts', 'src/board.test.ts'] }),
+  })
+  const final = prompt('the whole diff review')
+  assert.match(final, /\n- GAME-1: the lane left a note: the HUD reads the queue too/)
+  assert.match(final, /\n- GAME-1: changed files outside its own: src\/hud\.ts; check each change is needed/)
+})
+
+test('the result lists the findings each round fixed', async () => {
+  const must = { severity: 'must', file: 'src/board.ts', problem: 'rows never clear', fix: 'scan every row' }
+  const should = { severity: 'should', file: 'src/input.ts', problem: 'held keys repeat too fast', fix: 'add a delay' }
+  const { result, prompt } = await ship(plan(), {
+    'wave 1 review': { findings: [must] },
+    'gate 1': red('line clear is off by one', ['src/board.ts']),
+    'the whole diff review': { findings: [should] },
+  })
+  const gateFix = 'must src/board.ts — line clear is off by one — fix: root-cause and fix it; prove a flaky fix with about 10 repeats'
+  assert.deepEqual(result.fixed, [
+    'must src/board.ts — rows never clear — fix: scan every row',
+    gateFix,
+    'should src/input.ts — held keys repeat too fast — fix: add a delay',
+  ])
+  assert.ok(listAfter(prompt('the whole diff review'), 'Earlier rounds fixed these').includes(gateFix))
+  assert.equal(result.outcome, 'DONE')
 })
 
 test('a wave review knows what later waves still build', async () => {

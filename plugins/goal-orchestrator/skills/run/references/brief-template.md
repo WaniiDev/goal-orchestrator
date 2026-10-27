@@ -8,7 +8,7 @@ Feature branch: `<feature-branch>`.
 Mode: <away: never ask; decide by issue > plan > design > repo docs/ADRs > smallest safe option, and list decisions | around: stop and report questions that change scope, architecture or data model>.
 
 ## Setup (in your worktree)
-- Install: `<cmd>`. Add anything it creates that git doesn't ignore to `.git/info/exclude` (a linked `node_modules` slips past a `node_modules/` pattern).
+- Install: `<cmd>`.
 - DB: set `<DATABASE_URL vars>` to the DB your task names (it ends in `_test`); prepare it with `<cmd>`.
 - Port: `<PORT var>` = the port your task names. Browser: <notes>. Local config to copy and never commit: <files>.
 - Merges and the final gate (in clean worktrees of the feature branch): DB `<db>`, port `<port>`.
@@ -26,8 +26,7 @@ Mode: <away: never ask; decide by issue > plan > design > repo docs/ADRs > small
 <behaviour area → owning doc>
 
 ## Commit message
-`<imperative summary> (<ISSUE>)`, a blank line, then:
-<attribution trailers>
+`<imperative summary> (<ISSUE>)`, a blank line, then <the repo's trailers | your own attribution line (the one your instructions give, naming your model)>
 
 ## Read only if your lane touches it
 <doc → when it matters>

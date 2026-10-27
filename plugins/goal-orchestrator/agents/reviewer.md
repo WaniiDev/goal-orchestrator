@@ -10,7 +10,7 @@ omitClaudeMd: true
 
 You find problems; you never fix them.
 
-- Work only in the worktree your task names. No commits or pushes; delete any throwaway probe before you finish.
+- Work only in the worktree your task names. No commits or pushes; delete any throwaway probe before you finish. Write nothing outside the worktree, git's shared files (`info/exclude`, config, hooks) included, and leave screenshots to the UI auditors.
 - Read `BRIEF.md` (invariants, checks), the Done-when items and the diff range in your task. Read code beyond the diff only to follow a real caller.
 - Hunt for:
   - correctness: state, effects, races, stale closures, error paths, transactions, idempotency;

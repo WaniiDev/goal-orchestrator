@@ -42,12 +42,13 @@ On every turn of a run (after `/goal` starts one, a compaction, a resume or the 
 2. The goal: every issue (Done-when, Not in scope, links), any plan doc and design reference. If a written goal has no Done-when items, write them into `RUN.md`. Write each item so a test can prove it.
 3. Environment: a test DB (native; no Docker unless the repo requires it), a browser for e2e, network access, and how each agent gets its own DB and port.
 4. Create or check out the feature branch (the session's designated branch if given), push it, and run `git config rerere.enabled true`. Note its base: `git merge-base <default-branch> <feature-branch>`.
-5. Run the fast checks once on the base. List any failures in `BRIEF.md` as pre-existing, so agents don't re-prove them.
+5. Run the fast checks once on the base. List any failures in `BRIEF.md` as pre-existing, so agents don't re-prove them. If the install leaves files git doesn't ignore (a linked `node_modules` slips past a `node_modules/` pattern), add them once to `$(git rev-parse --git-common-dir)/info/exclude`, which every worktree shares; agents don't write git's shared files.
 6. Call `run_start` (branch, absolute repo path, any budget the user gave).
 
 ## Step 2: Plan
 
 - A **lane** is one issue (or a tight group) that one implementer owns end to end, with named files. A **wave** is 3–5 lanes with disjoint files. Order by dependency: schema and server before UI, shared primitives before the screens that use them; a lane that needs another lane's code goes in a later wave. Docs-only and test-only lanes ride along.
+- You write no product code: shared code (types, primitives, scaffolding) is a lane of an early wave, so it gets contract tests and a review like the rest. Before launching, check each wave: no lane's Done-when items need code that another lane of the same wave owns.
 - Write `BRIEF.md` from the [template](references/brief-template.md). It is the distilled repo profile that every agent reads instead of the steering docs.
 - Write the plan into `RUN.md` as the workflow's input:
   ```json
@@ -70,7 +71,7 @@ On every turn of a run (after `/goal` starts one, a compaction, a resume or the 
 
 1. Launch `Workflow` with `name: "goal-orchestrator:ship"` and `args`: the plan object itself, not a JSON string. If that name isn't found, pass `scriptPath`: `workflows/ship.js` two folders above this skill's base directory. If the result has `error`, fix the plan and relaunch. Note the `runId` and `transcriptDir` in `RUN.md`.
 2. Per wave, the workflow has failing contract tests written from the Done-when items, runs one implementer per lane in its own worktree, re-runs every claim, sends exact gaps back (at most 2 retries, then the lane is dropped), merges (a lane that waited for another lane of its wave builds again once that one merges), reviews (UI audits included) and turns findings into fix lanes. Then the final gate, with up to 2 fix rounds, and a whole-diff review. Don't poll it and don't duplicate its work: end your turn with the line `Waiting for the ship workflow.`; the result arrives as a task notification. If anything wakes you before it (a goal check-in, the watchdog), answer with that line again and no tool calls.
-3. When the result arrives, first save it verbatim to `reports/ship.json` (the report skill reads it). Then record in `RUN.md` the head, the gate checks, what shipped and what didn't and why, and the `untestable` items; append every lane's decisions, fix lanes included, to `DECISIONS.md`.
+3. When the result arrives, first save it verbatim to `reports/ship.json` (the report skill reads it). Then add to `RUN.md` (keep the run ID and transcript folder: a resume needs them) the head, the gate checks, what shipped and what didn't and why, the `untestable` items, and the findings fixed (`fixed`) and still open (`open`); append every lane's decisions, fix lanes included, to `DECISIONS.md`.
 4. `questions` (around mode): ask the user, add each answer to its lane as `"answers": [...]`, and relaunch with `resumeFromRunId`; finished agents return their saved results. Relaunch the same way if the run was cut off.
 5. Open security findings are never dropped: fix them, ask (around), or put them first in the PR (away).
 6. One ship run per goal: don't start another for lanes that didn't ship. They go in the PR and the results as not shipped, with the reasons.
