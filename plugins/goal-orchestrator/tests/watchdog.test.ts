@@ -141,7 +141,7 @@ describe('goal-orchestrator watchdog', () => {
     expect(w.prompts.length).toBe(2)
     expect(w.prompts[0]).toMatch(/no tool call and no agent report/)
     expect(w.goalClears).toBe(1)
-    expect(w.toasts.join(' ')).toMatch(/GOAL: BLOCKED — no activity/)
+    expect(w.toasts).toEqual([])
     expect((await bash($, 'ls')).deny).toMatch(/run is over \(BLOCKED\)/)
   })
 

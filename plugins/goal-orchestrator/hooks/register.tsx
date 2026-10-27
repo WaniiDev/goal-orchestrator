@@ -166,14 +166,8 @@ function end($: $, current: Run, phase: 'ended' | 'stopped', outcome: Outcome, s
   current.summary = summary
   ticker?.cancel()
   ticker = null
-  const line = finalLine(outcome, summary)
-  // A session the desktop app hosts has no notification channel for mods: toast there.
-  void $.ui
-    .notify(line, { title: 'goal-orchestrator' })
-    .then(sent => {
-      if (!sent.isSent) $.ui.toast(line)
-    })
-    .catch(() => undefined)
+  // A system notification where the surface has a channel; the band and the GOAL line show the end everywhere else.
+  void $.ui.notify(finalLine(outcome, summary), { title: 'goal-orchestrator' }).catch(() => undefined)
 }
 
 // /goal only clears itself on met / impossible / fatal error, so every
