@@ -1,7 +1,7 @@
 export const meta = {
   name: 'ship',
   description: 'Ship a planned goal on one branch: contract tests, lanes in waves, re-checked claims, merges, reviews and a final gate',
-  whenToUse: 'Started by /goal-orchestrator:run with the plan it writes; not for direct use',
+  whenToUse: 'Started by /shipwright:run with the plan it writes; not for direct use',
   phases: [
     { title: 'Contract', detail: 'failing acceptance tests from the Done-when items, before any code' },
     { title: 'Build', detail: 'one implementer per lane in its own worktree; every claim re-run' },
@@ -16,10 +16,10 @@ export const meta = {
 // report schema-checked JSON; every gate below is plain code over it.
 
 const TYPE = {
-  implementer: 'goal-orchestrator:implementer',
-  reviewer: 'goal-orchestrator:reviewer',
-  auditor: 'goal-orchestrator:ui-auditor',
-  integrator: 'goal-orchestrator:integrator',
+  implementer: 'shipwright:implementer',
+  reviewer: 'shipwright:reviewer',
+  auditor: 'shipwright:ui-auditor',
+  integrator: 'shipwright:integrator',
 }
 const MAX_FIX_LANES = 4
 const RESERVE = 50_000
@@ -209,7 +209,7 @@ const plan = args
 if (!plan || !plan.repo || !plan.branch || !plan.base || !plan.brief || !Array.isArray(plan.waves) || plan.waves.length === 0) {
   return {
     outcome: 'BLOCKED',
-    summary: 'The ship workflow runs the plan /goal-orchestrator:run writes (repo, branch, base, brief, waves); start it from there.',
+    summary: 'The ship workflow runs the plan /shipwright:run writes (repo, branch, base, brief, waves); start it from there.',
   }
 }
 const LIMITS = { laneRetries: 2, gateRounds: 2, ...(plan.limits || {}) }

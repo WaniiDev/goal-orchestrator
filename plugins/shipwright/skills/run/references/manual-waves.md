@@ -6,7 +6,7 @@ Only for a session without the `Workflow` tool. You drive what the ship workflow
 
 For each lane:
 1. `git worktree add -b lane-<id> <repo>/.claude/worktrees/lane-<id> <feature-branch>`. Don't use `isolation: "worktree"`: it branches from the default branch. Copy in any untracked local test config the lane needs.
-2. Launch `Agent` with `subagent_type: "goal-orchestrator:implementer"`, `name: "lane-<id>"`, and `model` and `effort` from `RUN.md`; it runs in the background. The prompt holds only: the worktree path, the `BRIEF.md` path, the issue(s) and Done-when items, owned files and files to avoid, the DB and port, and the e2e filter. The agent definition carries its rules and report format.
+2. Launch `Agent` with `subagent_type: "shipwright:implementer"`, `name: "lane-<id>"`, and `model` and `effort` from `RUN.md`; it runs in the background. The prompt holds only: the worktree path, the `BRIEF.md` path, the issue(s) and Done-when items, owned files and files to avoid, the DB and port, and the e2e filter. The agent definition carries its rules and report format.
 3. While lanes run, prepare the next wave. Don't duplicate their work.
 
 When a lane reports:
@@ -18,7 +18,7 @@ When a lane reports:
 
 ## Review the wave
 
-Skip docs-only and test-only waves. Otherwise launch `goal-orchestrator:reviewer` (model and effort from `RUN.md`) in a fresh worktree on the feature head, with the wave prompt from [review prompts](review-brief.md). For UI work, also launch one `goal-orchestrator:ui-auditor` per area (lists, dialogs and drawers, motion), each with its own DB and port.
+Skip docs-only and test-only waves. Otherwise launch `shipwright:reviewer` (model and effort from `RUN.md`) in a fresh worktree on the feature head, with the wave prompt from [review prompts](review-brief.md). For UI work, also launch one `shipwright:ui-auditor` per area (lists, dialogs and drawers, motion), each with its own DB and port.
 
 Save the findings to `reports/`. Turn must-fix and should-fix findings into fix lanes grouped by file, with a source file and its tests in one lane; a fix lane's commits name the issues whose files it changes. For each finding you drop, log the reason in `DECISIONS.md`. Re-review only the areas a large fix touched.
 

@@ -1,5 +1,5 @@
 // The ship workflow's control flow, with every agent faked.
-// Run: node --test plugins/goal-orchestrator/tests/ship.test.mjs
+// Run: node --test plugins/shipwright/tests/ship.test.mjs
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
@@ -145,7 +145,7 @@ test('merges, gates and reviews run in clean worktrees, away from the lane workt
 
 test('each role keeps its own model and effort', async () => {
   const { calls } = await ship(plan({ ui: { reference: 'docs/design.png', standard: 'house', areas: [{ name: 'board' }] } }), {})
-  const byType = type => calls.filter(call => call.agentType === `goal-orchestrator:${type}`)
+  const byType = type => calls.filter(call => call.agentType === `shipwright:${type}`)
   for (const call of byType('implementer')) assert.deepEqual([call.model, call.effort], ['sonnet', 'medium'])
   for (const call of byType('reviewer')) assert.deepEqual([call.model, call.effort], ['opus', 'xhigh'])
   for (const call of byType('integrator')) assert.deepEqual([call.model, call.effort], [undefined, undefined])
@@ -160,7 +160,7 @@ test('UI lanes get one audit per area, on the reviewer model unless the auditor 
   waves[0].lanes[0].ui = true
   const ui = { reference: 'docs/design.png', standard: 'house', areas: [{ name: 'board' }, { name: 'menus' }] }
   const { calls, labels } = await ship(plan({ waves, ui }))
-  const audits = calls.filter(call => call.agentType === 'goal-orchestrator:ui-auditor')
+  const audits = calls.filter(call => call.agentType === 'shipwright:ui-auditor')
   assert.deepEqual(audits.map(call => call.label), ['wave 1 audit board', 'wave 1 audit menus', 'the whole diff audit board', 'the whole diff audit menus'])
   for (const call of audits) assert.deepEqual([call.model, call.effort], ['opus', 'xhigh'])
   assert.ok(labels.includes('wave 1 review'))

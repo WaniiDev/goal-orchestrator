@@ -1,4 +1,4 @@
-# goal-orchestrator
+# shipwright
 
 A Claude Code plugin that ships a goal (an issue and its sub-issues, a plan doc, or a written goal) as **one PR on one branch** with a team of sub-agents, verified end to end.
 
@@ -21,12 +21,19 @@ The ship phase needs dynamic workflows (the `Workflow` tool). Without them, the 
 At the prompt of a terminal session:
 
 ```
-/plugin install goal-orchestrator --marketplace WaniiDev/goal-orchestrator
+/plugin install shipwright --marketplace WaniiDev/shipwright
 ```
 
-In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins, Add marketplace with `WaniiDev/goal-orchestrator`, then Add plugin.
+In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins, Add marketplace with `WaniiDev/shipwright`, then Add plugin.
 
-To update: `claude plugin update goal-orchestrator@goal-orchestrator-marketplace`, then `/reload-plugins` or a new session. For one session from a clone: `claude --plugin-dir ./plugins/goal-orchestrator`.
+To update: `claude plugin update shipwright@shipwright-marketplace`, then `/reload-plugins` or a new session. For one session from a clone: `claude --plugin-dir ./plugins/shipwright`.
+
+Shipwright was goal-orchestrator until 3.0.0. To move over, remove the old plugin and marketplace, then install as above:
+
+```bash
+claude plugin uninstall goal-orchestrator@goal-orchestrator-marketplace
+claude plugin marketplace remove goal-orchestrator-marketplace
+```
 
 ### Cloud sessions (claude.ai/code)
 
@@ -34,26 +41,26 @@ Cloud sessions don't load plugins from your machine or from a repository's `.cla
 
 ```bash
 #!/bin/bash
-claude plugin marketplace add WaniiDev/goal-orchestrator || true
-claude plugin install goal-orchestrator@goal-orchestrator-marketplace --scope user || true
+claude plugin marketplace add WaniiDev/shipwright || true
+claude plugin install shipwright@shipwright-marketplace --scope user || true
 ```
 
 - New sessions pick it up; running ones don't. The script clones without your credentials, so this repository must stay public.
 - The environment caches the script's result and runs it again only when the script or its allowed hosts change, or after about 7 days. After a release, edit the script (a comment will do) so new sessions get the new version.
-- To try a branch before it reaches `main`, pin it: `claude plugin marketplace add WaniiDev/goal-orchestrator#<branch>`.
+- To try a branch before it reaches `main`, pin it: `claude plugin marketplace add WaniiDev/shipwright#<branch>`.
 
 ## Use
 
 ```
-/goal-orchestrator:run WAN-346 and its sub-issues
-/goal-orchestrator:run docs/plan.md --auto
-/goal-orchestrator:status
-/goal-orchestrator:report
+/shipwright:run WAN-346 and its sub-issues
+/shipwright:run docs/plan.md --auto
+/shipwright:status
+/shipwright:report
 ```
 
-Or ask in plain words ("ship WAN-346 and its sub-issues as one PR while I sleep"). Claude can start the run skill itself, so another session, or a `/goal` that names goal-orchestrator, can start a run too.
+Or ask in plain words ("ship WAN-346 and its sub-issues as one PR while I sleep"). Claude can start the run skill itself, so another session, or a `/goal` that names shipwright, can start a run too.
 
-After the intake, the run arms `/goal` itself (`start_goal`), so it keeps going until a terminal state and never past one: goal mode waits while the ship workflow runs, and every terminal state clears it. Watch the ship phase live with `/workflows`. `/orchestrator-stop` ends a run by hand (as `BLOCKED`) and clears `/goal`.
+After the intake, the run arms `/goal` itself (`start_goal`), so it keeps going until a terminal state and never past one: goal mode waits while the ship workflow runs, and every terminal state clears it. Watch the ship phase live with `/workflows`. `/shipwright-stop` ends a run by hand (as `BLOCKED`) and clears `/goal`.
 
 Headless (`claude -p`): set `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`. Otherwise print mode stops background work 10 minutes after the last turn, which cuts the ship workflow off mid-run.
 
@@ -64,9 +71,9 @@ Headless (`claude -p`): set `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`. Otherwise 
 - `skills/run/`: the method (`SKILL.md`) and its references, each read only at its step: intake, the brief template, delivery, and the manual waves for sessions without workflows (with their review prompts).
 - `workflows/ship.js`: the ship phase. Its input is the plan the run skill writes; it returns the outcome, what shipped and what didn't (and why), the gate's checks, the findings fixed and still open, decisions, and the output tokens it spent.
 - `skills/status/`, `skills/report/`: the progress and final-results formats. Only you invoke them, so they add nothing to a session's context until used.
-- `hooks/register.tsx` (a Claude Code mod, v2.1.287+): a band above the prompt while a run is active (one line: a thin ring for the time budget in the desktop app, Claude's ✻ in the terminal; amber when the run stalls, a mark when it ends), `start_goal` (arms `/goal` after the intake and keeps the finish line in the system prompt and in what a compaction keeps), `run_start` / `run_finish` tools, a progress and budget watchdog (no new commit, repeated failures, time, quiet runs), `/orchestrator-stop`, `/goal clear` on every terminal state, and guards against `pkill`/`killall`, force push and `--no-verify` while a run is active.
+- `hooks/register.tsx` (a Claude Code mod, v2.1.287+): a band above the prompt while a run is active (one line: a thin ring for the time budget in the desktop app, Claude's ✻ in the terminal; amber when the run stalls, a mark when it ends), `start_goal` (arms `/goal` after the intake and keeps the finish line in the system prompt and in what a compaction keeps), `run_start` / `run_finish` tools, a progress and budget watchdog (no new commit, repeated failures, time, quiet runs), `/shipwright-stop`, `/goal clear` on every terminal state, and guards against `pkill`/`killall`, force push and `--no-verify` while a run is active.
 - `agents/implementer.md` (default Sonnet · medium), `agents/reviewer.md` and `agents/ui-auditor.md` (default Opus · xhigh), `agents/integrator.md` (Sonnet · low: re-checks, merges, the gate). Each carries its own rules, so prompts carry only the lane's facts. The intake's choices override the models per run.
-- Tests: `claude plugin test plugins/goal-orchestrator` (the mod) and `node --test plugins/goal-orchestrator/tests/ship.test.mjs` (the workflow's control flow, with every agent faked).
+- Tests: `claude plugin test plugins/shipwright` (the mod) and `node --test plugins/shipwright/tests/ship.test.mjs` (the workflow's control flow, with every agent faked).
 
 ## Token use
 

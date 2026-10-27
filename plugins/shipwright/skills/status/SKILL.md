@@ -1,6 +1,6 @@
 ---
 name: status
-description: Show a goal-orchestrator run's progress as a compact icon list.
+description: Show a shipwright run's progress as a compact icon list.
 disable-model-invocation: true
 ---
 

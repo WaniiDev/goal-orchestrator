@@ -41,6 +41,6 @@ export type ActiveGoal = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'goal-orchestrator': { run: Run | null; goal: ActiveGoal | null }
+    'shipwright': { run: Run | null; goal: ActiveGoal | null }
   }
 }

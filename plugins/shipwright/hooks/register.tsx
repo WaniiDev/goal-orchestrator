@@ -2,19 +2,19 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { ActiveGoal, Limits, Outcome, Run } from '../types'
 
-// Goal mode and exit paths for a goal-orchestrator run, enforced in code
+// Goal mode and exit paths for a shipwright run, enforced in code
 // instead of prose: start_goal (queues /goal and keeps its finish line in the
 // system prompt), run_start / run_finish tools, a progress and budget
-// watchdog, a quiet-run wake-up, /orchestrator-stop, a /goal clear on every
+// watchdog, a quiet-run wake-up, /shipwright-stop, a /goal clear on every
 // terminal state, and command guards while a run is active.
 
 type $ = EngineInterface
 
-const RUN = { plugin: 'goal-orchestrator', key: 'run' } as const
-const GOAL = { plugin: 'goal-orchestrator', key: 'goal' } as const
-const START = 'mcp__goal-orchestrator__run_start'
-const FINISH = 'mcp__goal-orchestrator__run_finish'
-const START_GOAL = 'mcp__goal-orchestrator__start_goal'
+const RUN = { plugin: 'shipwright', key: 'run' } as const
+const GOAL = { plugin: 'shipwright', key: 'goal' } as const
+const START = 'mcp__shipwright__run_start'
+const FINISH = 'mcp__shipwright__run_finish'
+const START_GOAL = 'mcp__shipwright__start_goal'
 /** `/goal`'s own limit on a condition. */
 const MAX_CONDITION = 4000
 /** `/goal clear` and its aliases. */
@@ -167,7 +167,7 @@ function end($: $, current: Run, phase: 'ended' | 'stopped', outcome: Outcome, s
   ticker?.cancel()
   ticker = null
   // A system notification where the surface has a channel; the band and the GOAL line show the end everywhere else.
-  void $.ui.notify(finalLine(outcome, summary), { title: 'goal-orchestrator' }).catch(() => undefined)
+  void $.ui.notify(finalLine(outcome, summary), { title: 'shipwright' }).catch(() => undefined)
 }
 
 // /goal only clears itself on met / impossible / fatal error, so every
@@ -176,14 +176,14 @@ function clearGoal($: $): void {
   void $.state.set(GOAL, null)
   $.clock.after(0, () => {
     void $.command.run({ command: 'goal', args: 'clear' }).catch(error => {
-      $.ui.log(`goal-orchestrator: could not run /goal clear (${String(error)}); run it yourself.`)
+      $.ui.log(`shipwright: could not run /goal clear (${String(error)}); run it yourself.`)
     })
   })
 }
 
 function wrapUpNotice(current: Run): string {
   return [
-    `goal-orchestrator watchdog: ${current.reason}.`,
+    `shipwright watchdog: ${current.reason}.`,
     'Stop starting new work, and stop a running ship workflow with TaskStop. Push the branch, save state (RUN.md, DECISIONS.md, draft PR),',
     `remove lane worktrees, then call run_finish with PARTIAL or BLOCKED. ${current.graceLeft} tool calls left before a hard stop.`,
   ].join(' ')
@@ -219,7 +219,7 @@ async function tick($: $): Promise<void> {
   await save($)
   await $.prompt
     .submit({
-      text: `goal-orchestrator watchdog: no tool call and no agent report for ${run.limits.maxQuietMinutes} min. Check the ship workflow and any running agents; relaunch or drop what hangs, or call run_finish if the run cannot continue.`,
+      text: `shipwright watchdog: no tool call and no agent report for ${run.limits.maxQuietMinutes} min. Check the ship workflow and any running agents; relaunch or drop what hangs, or call run_finish if the run cannot continue.`,
     })
     .catch(() => undefined)
 }
@@ -231,7 +231,7 @@ function num(value: unknown, fallback: number): number {
 const startSpec = {
   name: 'run_start',
   description:
-    'Start the goal-orchestrator watchdog for this run (call once after intake, and again on resume). It ends the run as BLOCKED instead of looping when there is no progress, the same command keeps failing, or the time budget is spent.',
+    'Start the shipwright watchdog for this run (call once after intake, and again on resume). It ends the run as BLOCKED instead of looping when there is no progress, the same command keeps failing, or the time budget is spent.',
   isDeferred: true,
   inputSchema: {
     type: 'object',
@@ -249,7 +249,7 @@ const startSpec = {
 const finishSpec = {
   name: 'run_finish',
   description:
-    'End the goal-orchestrator run in exactly one terminal state. Call it last, after pushing the branch, saving state and removing lane worktrees. DONE: everything shipped and verified. PARTIAL: some issues shipped, the rest listed. BLOCKED: only the user can unblock it (auth, secret, permission, approval) or the run cannot make progress.',
+    'End the shipwright run in exactly one terminal state. Call it last, after pushing the branch, saving state and removing lane worktrees. DONE: everything shipped and verified. PARTIAL: some issues shipped, the rest listed. BLOCKED: only the user can unblock it (auth, secret, permission, approval) or the run cannot make progress.',
   isDeferred: true,
   inputSchema: {
     type: 'object',
@@ -265,7 +265,7 @@ const finishSpec = {
 const startGoalSpec = {
   name: 'start_goal',
   description:
-    "Turn on Claude Code goal mode for a goal-orchestrator run: queues `/goal <condition>` exactly as if the user typed it. Call it once, right after the run skill's intake. The goal starts when this turn ends: say in one line that goal mode is armed, then end your turn.",
+    "Turn on Claude Code goal mode for a shipwright run: queues `/goal <condition>` exactly as if the user typed it. Call it once, right after the run skill's intake. The goal starts when this turn ends: say in one line that goal mode is armed, then end your turn.",
   isDeferred: true,
   inputSchema: {
     type: 'object',
@@ -279,9 +279,9 @@ const startGoalSpec = {
 
 function finishLine(goal: ActiveGoal): string {
   return [
-    'A goal-orchestrator run is active in this session, in goal mode.',
+    'A shipwright run is active in this session, in goal mode.',
     `Its finish line (the /goal condition): ${goal.condition}`,
-    `Its state is in ${goal.runFile || 'RUN.md in the scratchpad'}: re-read it before acting after a compaction or a resume, then continue the goal-orchestrator:run skill from the step it records.`,
+    `Its state is in ${goal.runFile || 'RUN.md in the scratchpad'}: re-read it before acting after a compaction or a resume, then continue the shipwright:run skill from the step it records.`,
     'If `/goal` reports the goal achieved or cleared, this no longer applies.',
   ].join('\n')
 }
@@ -293,17 +293,17 @@ export const register: Register = on => {
     await $.tool.register(startSpec)
     await $.tool.register(finishSpec)
     await $.command.register({
-      name: 'orchestrator-stop',
-      description: 'End the running goal-orchestrator run as BLOCKED and clear /goal',
+      name: 'shipwright-stop',
+      description: 'End the running shipwright run as BLOCKED and clear /goal',
     })
     if (run !== null && run.phase !== 'ended' && run.phase !== 'stopped') startTicker($)
     return next(e)
   })
 
-  on('command.run', { command: 'orchestrator-stop' }, async $ => {
+  on('command.run', { command: 'shipwright-stop' }, async $ => {
     if (run === null || run.phase === 'ended' || run.phase === 'stopped') {
       clearGoal($)
-      return { text: 'No goal-orchestrator run is active; cleared /goal.' }
+      return { text: 'No shipwright run is active; cleared /goal.' }
     }
     end($, run, 'stopped', 'BLOCKED', 'stopped by the user')
     await save($)
@@ -324,13 +324,13 @@ export const register: Register = on => {
     // A slash command can't run inside the hook the turn is waiting on: queue it for when the session is idle.
     $.clock.after(0, () => {
       void $.command.run({ command: 'goal', args: condition }).catch(() => {
-        $.ui.toast('goal-orchestrator: /goal could not start. Type /goal and paste the condition from RUN.md.')
+        $.ui.toast('shipwright: /goal could not start. Type /goal and paste the condition from RUN.md.')
       })
     })
     return {
       result: `Goal mode is queued: /goal starts when this turn ends and keeps the run going until this condition is met:\n${condition}\nEnd your turn now.`,
     }
-  }).catch(() => ({ deny: 'start_goal failed inside the goal-orchestrator mod; give the user the /goal line from RUN.md to paste.' }))
+  }).catch(() => ({ deny: 'start_goal failed inside the shipwright mod; give the user the /goal line from RUN.md to paste.' }))
 
   // `/goal clear`, or a /goal for something else, ends this run's hold on the finish line.
   on('command.run', { command: 'goal' }, async ($, e, next) => {
@@ -347,7 +347,7 @@ export const register: Register = on => {
     const composed = await next(e)
     const goal = (await $.state.get(GOAL)).value ?? null
     if (goal === null) return composed
-    return { ...composed, sections: [...composed.sections, { id: 'goal-orchestrator:finish-line', text: finishLine(goal), scope: 'session' }] }
+    return { ...composed, sections: [...composed.sections, { id: 'shipwright:finish-line', text: finishLine(goal), scope: 'session' }] }
   })
 
   // Some surfaces put session sections in the first message, which a compaction summarizes away: the summary
@@ -395,7 +395,7 @@ export const register: Register = on => {
     return {
       result: `Watchdog on for ${branch}: ${limits.maxHours}h, ${limits.maxIdleCalls} idle calls, ${limits.maxSameFailure} same failures. End the run only through run_finish.`,
     }
-  }).catch(() => ({ deny: 'run_start failed inside the goal-orchestrator mod; continue without the watchdog and follow the skill\'s stop rules.' }))
+  }).catch(() => ({ deny: 'run_start failed inside the shipwright mod; continue without the watchdog and follow the skill\'s stop rules.' }))
 
   on('tool.call', { tool: FINISH }, async ($, e) => {
     const input = e as unknown as Record<string, unknown>
@@ -411,7 +411,7 @@ export const register: Register = on => {
     return {
       result: `Run recorded as ${outcome}. Make no more tool calls, apart from the app's own end-of-turn wrap-up if it asks for one. End your reply with this exact line:\n${line}`,
     }
-  }).catch(() => ({ deny: 'run_finish failed inside the goal-orchestrator mod; end your reply with the GOAL line yourself.' }))
+  }).catch(() => ({ deny: 'run_finish failed inside the shipwright mod; end your reply with the GOAL line yourself.' }))
 
   // Every other tool call: the guards, the terminal lock, and the watchdog.
   on('tool.call', async ($, e, next) => {
@@ -424,13 +424,13 @@ export const register: Register = on => {
     if (current.phase === 'ended' || current.phase === 'stopped') {
       if (e.tool === 'TaskStop') return next(e)
       return {
-        deny: `The goal-orchestrator run is over (${current.outcome}). Make no more tool calls; end your reply with: ${finalLine(current.outcome ?? 'BLOCKED', current.summary)}`,
+        deny: `The shipwright run is over (${current.outcome}). Make no more tool calls; end your reply with: ${finalLine(current.outcome ?? 'BLOCKED', current.summary)}`,
       }
     }
 
     const command = e.tool === 'Bash' ? e.command : ''
     const guard = command === '' ? undefined : guardReason(command)
-    if (guard !== undefined) return { deny: `goal-orchestrator guard: ${guard}.` }
+    if (guard !== undefined) return { deny: `shipwright guard: ${guard}.` }
 
     if (!isMain) {
       // A sub-agent at work is activity, not progress: a long lane is not a quiet run.
@@ -482,7 +482,7 @@ export const register: Register = on => {
     // A watchdog failure must not stall the session: keep the guards, let the rest through.
     if (next.called) return next(e)
     const guard = e.tool === 'Bash' ? guardReason(e.command) : undefined
-    return guard === undefined ? next(e) : { deny: `goal-orchestrator guard: ${guard}.` }
+    return guard === undefined ? next(e) : { deny: `shipwright guard: ${guard}.` }
   })
 
   // The band: a ring on desktop, Claude's ✻ in the terminal, one line each. It yields to a survey and leaves with the run.

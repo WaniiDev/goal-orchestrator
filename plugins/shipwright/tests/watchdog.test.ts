@@ -2,18 +2,18 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On, SessionMessage } from 'claude-code'
 
-const START = 'mcp__goal-orchestrator__run_start'
-const FINISH = 'mcp__goal-orchestrator__run_finish'
-const START_GOAL = 'mcp__goal-orchestrator__start_goal'
+const START = 'mcp__shipwright__run_start'
+const FINISH = 'mcp__shipwright__run_finish'
+const START_GOAL = 'mcp__shipwright__start_goal'
 const COMPOSE = { model: 'claude-sonnet-5-5', promptModel: 'claude-sonnet-5-5', surfaces: [], tools: [], outputStyle: null, traits: [] } as const
 const TRANSCRIPT: SessionMessage[] = [{ role: 'user', text: 'ship WAN-1', toolUses: [] }]
 const BAND = {
-  plugin: 'goal-orchestrator',
+  plugin: 'shipwright',
   component: 'AbovePrompt',
   requestId: 'band',
   props: { hasSurvey: false, isWorking: true, maxRows: 6, bodyColumns: 80, scroll: { offset: 0, bodyRows: 6 }, view: {} },
 } as const
-const CONDITION = 'goal-orchestrator run for WAN-1. Met when the latest reply ends with a line starting "GOAL: DONE", "GOAL: PARTIAL" or "GOAL: BLOCKED".'
+const CONDITION = 'shipwright run for WAN-1. Met when the latest reply ends with a line starting "GOAL: DONE", "GOAL: PARTIAL" or "GOAL: BLOCKED".'
 
 type World = { heads: string[]; goals: string[]; goalClears: number; prompts: string[]; toasts: string[]; failing: Set<string> }
 
@@ -61,7 +61,7 @@ const bash = ($: Engine, command: string) => $.tool.call({ tool: 'Bash', command
 const mainTurnEnds = ($: Engine) =>
   $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as never)
 
-describe('goal-orchestrator watchdog', () => {
+describe('shipwright watchdog', () => {
   test('guards apply only while a run is active', async ($, on) => {
     mock.clock(on)
     world(on)
@@ -102,7 +102,7 @@ describe('goal-orchestrator watchdog', () => {
     expect(tripped.context?.join(' ')).toMatch(/watchdog: "bun test" failed 2 times/)
 
     expect((await $.tool.call({ tool: 'Agent', prompt: 'x', description: 'x' } as never)).deny).toMatch(/No new agents/)
-    expect((await $.tool.call({ tool: 'Workflow', name: 'goal-orchestrator:ship' } as never)).deny).toMatch(/No new agents or workflows/)
+    expect((await $.tool.call({ tool: 'Workflow', name: 'shipwright:ship' } as never)).deny).toMatch(/No new agents or workflows/)
     let last = await bash($, 'git status')
     for (let i = 0; i < 20 && last.deny === undefined; i++) last = await bash($, 'git status')
     expect(last.deny).toMatch(/Hard stop\. GOAL: BLOCKED/)
@@ -170,12 +170,12 @@ describe('goal-orchestrator watchdog', () => {
     expect((await bash($, 'ls')).deny).toMatch(/run is over/)
   })
 
-  test('/orchestrator-stop ends the run and clears /goal', async ($, on) => {
+  test('/shipwright-stop ends the run and clears /goal', async ($, on) => {
     const clock = mock.clock(on)
     const w = world(on)
     await begin($)
     const stopped = await $.command.run({
-      command: 'orchestrator-stop',
+      command: 'shipwright-stop',
       args: '',
       origin: { kind: 'composer' },
       presentation: { isFullscreen: false, columns: 80 },
@@ -187,7 +187,7 @@ describe('goal-orchestrator watchdog', () => {
   })
 })
 
-describe('goal-orchestrator goal mode', () => {
+describe('shipwright goal mode', () => {
   test('start_goal queues /goal with the condition once the turn is over', async ($, on) => {
     const clock = mock.clock(on)
     const w = world(on)
@@ -206,7 +206,7 @@ describe('goal-orchestrator goal mode', () => {
     await $.tool.call({ tool: START_GOAL, condition: CONDITION, run_file: '/state/RUN.md' } as never)
     await clock.advance(1)
     const [section] = (await $.prompt.compose(COMPOSE as never)).sections
-    expect(section?.id).toBe('goal-orchestrator:finish-line')
+    expect(section?.id).toBe('shipwright:finish-line')
     expect(section?.text).toContain(CONDITION)
     expect(section?.text).toContain('/state/RUN.md')
     await $.command.run({ command: 'goal', args: 'clear' } as never)

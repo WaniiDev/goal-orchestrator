@@ -1,11 +1,11 @@
 ---
 name: run
 description: Ship a goal (a tracker issue and its sub-issues, a plan doc, or a written goal) as ONE pull request on ONE branch. An intake asks which models, effort, mode and finish line to use; goal mode holds the finish line; the ship workflow builds it in waves with contract tests first, re-checked claims, reviews and a final gate; you deliver it.
-when_to_use: The user runs /goal-orchestrator:run, a /goal condition or prompt names goal-orchestrator, or the user asks to ship several issues or a multi-step goal with sub-agents "as one PR" or "while I sleep".
+when_to_use: The user runs /shipwright:run, a /goal condition or prompt names shipwright, or the user asks to ship several issues or a multi-step goal with sub-agents "as one PR" or "while I sleep".
 argument-hint: "<goal: issue key(s), plan doc path, or a sentence> [--auto]"
 ---
 
-# Goal orchestrator
+# Shipwright
 
 You plan and deliver; the `ship` workflow runs the build. Keep conclusions in your context, not file contents.
 
@@ -13,7 +13,7 @@ Goal: $ARGUMENTS
 
 Read each reference only at its step: [intake](references/intake.md) (0), [brief template](references/brief-template.md) (2), [delivery](references/delivery.md) (4). Progress format: [status](../status/SKILL.md). Final results: [report](../report/SKILL.md).
 
-**State** lives in the scratchpad (else `.orchestrator/` in the session temp dir): `RUN.md` (choices, plan, the workflow's run ID and transcript folder, gate results), `DECISIONS.md` (one line per decision: what, why, which source), `BRIEF.md`, `reports/`. After a compaction, re-read `RUN.md` first. After a container restart, restart services (for example the DB).
+**State** lives in the scratchpad (else `.shipwright/` in the session temp dir): `RUN.md` (choices, plan, the workflow's run ID and transcript folder, gate results), `DECISIONS.md` (one line per decision: what, why, which source), `BRIEF.md`, `reports/`. After a compaction, re-read `RUN.md` first. After a container restart, restart services (for example the DB).
 
 ## Step 0: Intake
 
@@ -28,9 +28,9 @@ Load `mcp__ccd_session_mgmt__get_usage` with `ToolSearch` (`select:mcp__ccd_sess
 ## Step 0b: Arm goal mode
 
 Right after the intake (`--auto` included), before recon, so the run can't lose its finish line. Goal mode re-checks the condition after every turn, waits while the workflow runs, and the mod clears it when the run ends.
-1. Write the condition into `RUN.md`, at most 4,000 characters, judged from the conversation alone: "goal-orchestrator run for <goal>, state in <RUN.md path>. Met when the orchestrator's latest reply ends with a line starting `GOAL: DONE`, `GOAL: PARTIAL` or `GOAL: BLOCKED`. Until then the run works toward: every issue's Done-when met, the final gate green, and <branch pushed | PR open with CI green | PR merged into <base> with CI green>. Also met after 80 turns."
+1. Write the condition into `RUN.md`, at most 4,000 characters, judged from the conversation alone: "shipwright run for <goal>, state in <RUN.md path>. Met when the orchestrator's latest reply ends with a line starting `GOAL: DONE`, `GOAL: PARTIAL` or `GOAL: BLOCKED`. Until then the run works toward: every issue's Done-when met, the final gate green, and <branch pushed | PR open with CI green | PR merged into <base> with CI green>. Also met after 80 turns."
 2. Already inside a `/goal` that names this plugin: it is set. Record it in `RUN.md` and go on.
-3. Otherwise, load the run tools with one `ToolSearch` (`select:mcp__goal-orchestrator__start_goal,mcp__goal-orchestrator__run_start,mcp__goal-orchestrator__run_finish`). Then, first match wins:
+3. Otherwise, load the run tools with one `ToolSearch` (`select:mcp__shipwright__start_goal,mcp__shipwright__run_start,mcp__shipwright__run_finish`). Then, first match wins:
    - `start_goal` with `condition` and `run_file` (the absolute `RUN.md` path): say in one line that goal mode is armed and end your turn. `/goal` starts when the turn ends and brings you back (Step 0c).
    - `ProposeGoal`, if the session offers it: the condition cut to 500 characters (the full one stays in `RUN.md`); `ask_user: false` only when the user picked the finish line. End your turn.
    - Neither: around, give the user `/goal <condition>` to paste and wait; away, say so in one line and carry on.
@@ -73,7 +73,7 @@ On every turn of a run (after `/goal` starts one, a compaction, a resume or the 
 
 ## Step 3: Ship
 
-1. Launch `Workflow` with `name: "goal-orchestrator:ship"` and `args`: the plan object itself, not a JSON string. If that name isn't found, pass `scriptPath`: `workflows/ship.js` two folders above this skill's base directory. If the result has `error`, fix the plan and relaunch. Note the `runId` and `transcriptDir` in `RUN.md`.
+1. Launch `Workflow` with `name: "shipwright:ship"` and `args`: the plan object itself, not a JSON string. If that name isn't found, pass `scriptPath`: `workflows/ship.js` two folders above this skill's base directory. If the result has `error`, fix the plan and relaunch. Note the `runId` and `transcriptDir` in `RUN.md`.
 2. Per wave, the workflow has failing contract tests written from the Done-when items, runs one implementer per lane in its own worktree, re-runs every claim, sends exact gaps back (at most 2 retries, then the lane is dropped), merges (a lane that waited for another lane of its wave builds again once that one merges), reviews (UI audits included) and turns findings into fix lanes. Then the final gate, with up to 2 fix rounds, and a whole-diff review. Don't poll it and don't duplicate its work: end your turn with the line `Waiting for the ship workflow.`; the result arrives as a task notification. If anything wakes you before it (a goal check-in, the watchdog), answer with that line again and no tool calls.
 3. When the result arrives, first save it verbatim to `reports/ship.json` (the report skill reads it). Then add to `RUN.md` (keep the run ID and transcript folder: a resume needs them) the head, the gate checks, what shipped and what didn't and why, the `untestable` items, and the findings fixed (`fixed`) and still open (`open`), and `tokens`; append every lane's decisions, fix lanes included, to `DECISIONS.md`.
 4. `questions` (around mode): ask the user, add each answer to its lane as `"answers": [...]`, and relaunch with `resumeFromRunId`; finished agents return their saved results. Relaunch the same way if the run was cut off.
@@ -107,7 +107,7 @@ The plugin's mod enforces this:
 - **Progress** is a new commit on the feature branch or an agent report; an agent at work keeps the run from looking quiet.
 - **Wrap-up** starts after no progress: 60 orchestrator tool calls, the same command failing 3 times, the 8 h budget, or 45 quiet minutes twice. The mod then refuses new agents and workflows.
 - **Hard stop as `BLOCKED`** if `run_finish` doesn't come within 15 more calls.
-- **Every terminal state clears `/goal`.** The user can end a run with `/orchestrator-stop`.
+- **Every terminal state clears `/goal`.** The user can end a run with `/shipwright-stop`.
 
 If `run_start` doesn't exist (Claude Code before v2.1.287, or mods off), apply these rules yourself and end with `GOAL: DONE|PARTIAL|BLOCKED — <summary>`.
 

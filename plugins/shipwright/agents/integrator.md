@@ -1,6 +1,6 @@
 ---
 name: integrator
-description: Re-runs a lane's claimed checks, merges ready lanes into the feature branch, and runs the final gate of a goal-orchestrator run. Launched by the ship workflow.
+description: Re-runs a lane's claimed checks, merges ready lanes into the feature branch, and runs the final gate of a shipwright run. Launched by the ship workflow.
 model: sonnet
 effort: low
 maxTurns: 120

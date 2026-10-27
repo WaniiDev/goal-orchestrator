@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: Builds one lane of a goal-orchestrator run in the worktree it is given, test first, and reports back. Launched by /goal-orchestrator:run.
+description: Builds one lane of a shipwright run in the worktree it is given, test first, and reports back. Launched by /shipwright:run.
 model: sonnet
 effort: medium
 maxTurns: 200

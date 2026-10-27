@@ -1,6 +1,6 @@
 ---
 name: report
-description: Produce a finished goal-orchestrator run's final results in the forms chosen at intake.
+description: Produce a finished shipwright run's final results in the forms chosen at intake.
 disable-model-invocation: true
 ---
 

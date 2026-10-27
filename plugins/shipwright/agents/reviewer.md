@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Reviews a goal-orchestrator wave or the whole diff and returns verified, ranked findings. Never edits code. Launched by /goal-orchestrator:run.
+description: Reviews a shipwright wave or the whole diff and returns verified, ranked findings. Never edits code. Launched by /shipwright:run.
 model: opus
 effort: xhigh
 maxTurns: 120

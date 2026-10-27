@@ -1,6 +1,6 @@
 ---
 name: ui-auditor
-description: Audits built screens against a design reference (or, without one, the screen's Done-when items) with real screenshots and motion captures, and returns evidence-backed findings. Never edits product code. Launched by /goal-orchestrator:run for UI goals.
+description: Audits built screens against a design reference (or, without one, the screen's Done-when items) with real screenshots and motion captures, and returns evidence-backed findings. Never edits product code. Launched by /shipwright:run for UI goals.
 model: opus
 effort: xhigh
 maxTurns: 150
