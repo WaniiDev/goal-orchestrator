@@ -7,6 +7,12 @@ const FINISH = 'mcp__goal-orchestrator__run_finish'
 const START_GOAL = 'mcp__goal-orchestrator__start_goal'
 const COMPOSE = { model: 'claude-sonnet-5-5', promptModel: 'claude-sonnet-5-5', surfaces: [], tools: [], outputStyle: null, traits: [] } as const
 const TRANSCRIPT: SessionMessage[] = [{ role: 'user', text: 'ship WAN-1', toolUses: [] }]
+const BAND = {
+  plugin: 'goal-orchestrator',
+  component: 'AbovePrompt',
+  requestId: 'band',
+  props: { hasSurvey: false, isWorking: true, maxRows: 6, bodyColumns: 80, scroll: { offset: 0, bodyRows: 6 }, view: {} },
+} as const
 const CONDITION = 'goal-orchestrator run for WAN-1. Met when the latest reply ends with a line starting "GOAL: DONE", "GOAL: PARTIAL" or "GOAL: BLOCKED".'
 
 type World = { heads: string[]; goals: string[]; goalClears: number; prompts: string[]; toasts: string[]; failing: Set<string> }
@@ -20,7 +26,7 @@ function world(on: On): World {
   on('process.run', () => ({
     value: { exitCode: 0, stdout: `${w.heads[0]}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
   }))
-  on('ui.status', () => ({ value: undefined }))
+  on('ui.invalidate', () => ({ value: undefined }))
   on('ui.log', () => ({ value: undefined }))
   on('ui.notify', () => ({ value: { isSent: false, reason: 'no-surface' } }) as never)
   on('ui.toast', ($, e) => {
@@ -251,5 +257,28 @@ describe('goal-orchestrator goal mode', () => {
     await clock.advance(1)
     expect(w.goals).toEqual([CONDITION, 'clear'])
     expect((await $.prompt.compose(COMPOSE as never)).sections).toEqual([])
+  })
+
+  test('the band is one line: a ring on desktop, ✻ in the terminal, then how the run ended', async ($, on) => {
+    const clock = mock.clock(on)
+    world(on)
+    await begin($)
+    await clock.advance(30 * 60_000)
+
+    const desktop = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    expect((await desktop.find({ type: 'Text', text: /^Shipping$/ }))?.props.color).toBe('claude')
+    expect((await desktop.find({ type: 'Text', text: /since a commit/ }))?.text).toBe('Shipping feat/x · 30m of 8h · 0 calls since a commit')
+    expect(String((await desktop.find({ type: 'Svg' }))?.props.source)).toContain('stroke-dasharray')
+    await desktop.unmount()
+
+    const terminal = await $.ui.mount({ ...BAND, surface: 'terminal' })
+    expect((await terminal.find({ type: 'Text', text: /^✻$/ }))?.props.color).toBe('claude')
+    await terminal.unmount()
+
+    await $.tool.call({ tool: FINISH, outcome: 'DONE', summary: 'PR #7 merged' } as never)
+    const ended = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    expect((await ended.find({ type: 'Text', text: /^Shipped$/ }))?.props.color).toBe('success')
+    expect(String((await ended.find({ type: 'Svg' }))?.props.source)).toContain('M5.5 9.2')
+    await ended.unmount()
   })
 })

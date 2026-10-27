@@ -23,7 +23,8 @@ const CLEARS = new Set(['clear', 'stop', 'off', 'reset', 'none', 'cancel'])
 const TURN_TOOLS = 'mcp__ccd_turn__'
 const OUTCOMES: readonly Outcome[] = ['DONE', 'PARTIAL', 'BLOCKED']
 const CHECK_HEAD_MS = 30_000
-const TICK_MS = 5 * 60_000
+// Each tick also redraws the band, so its clock moves between tool calls.
+const TICK_MS = 60_000
 const MAX_QUIET_WAKES = 2
 
 export const DEFAULTS: Limits = {
@@ -62,15 +63,78 @@ async function save($: $): Promise<void> {
   await $.state.set(RUN, run)
 }
 
-function status($: $, now: number): void {
-  if (run === null) {
-    $.ui.status(undefined)
-    return
+// The band above the prompt: one quiet line, drawn from the saved run so every save redraws it.
+type Tone = 'active' | 'stalling' | 'wrapup' | 'done' | 'partial' | 'blocked'
+
+export type RunView = {
+  tone: Tone
+  /** What the run is doing, then its branch. */
+  label: string
+  branch: string
+  /** The rest of the line, dim. */
+  detail: string
+  /** Share of the time budget spent, 0–1. */
+  time: number
+}
+
+// Claude's own orange while it works; the theme's colors once it needs you or ends.
+const TONES: Record<Tone, { theme: string; hex: string }> = {
+  active: { theme: 'claude', hex: '#d97757' },
+  stalling: { theme: 'warning', hex: '#e0a43a' },
+  wrapup: { theme: 'warning', hex: '#e0a43a' },
+  done: { theme: 'success', hex: '#5a9e6f' },
+  partial: { theme: 'warning', hex: '#e0a43a' },
+  blocked: { theme: 'error', hex: '#d0534f' },
+}
+const STALLING = 2 / 3
+
+function duration(ms: number): string {
+  const minutes = Math.max(0, Math.round(ms / 60_000))
+  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+}
+
+export function runView(current: Run, now: number): RunView {
+  const { limits, branch } = current
+  const elapsed = now - current.startedAt
+  const time = Math.min(1, Math.max(0, elapsed / (limits.maxHours * 3_600_000)))
+  const clock = `${duration(elapsed)} of ${limits.maxHours}h`
+  if (current.phase === 'active') {
+    const calls = current.idleCalls === 1 ? '1 call' : `${current.idleCalls} calls`
+    const stalling = current.idleCalls / limits.maxIdleCalls >= STALLING
+    return { tone: stalling ? 'stalling' : 'active', label: 'Shipping', branch, detail: `${clock} · ${calls} since a commit`, time }
   }
-  const minutes = Math.round((now - run.startedAt) / 60_000)
-  const elapsed = `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}m`
-  const label = run.phase === 'active' ? `idle ${run.idleCalls}/${run.limits.maxIdleCalls}` : run.phase
-  $.ui.status(`orchestrator · ${elapsed}/${run.limits.maxHours}h · ${label}`)
+  if (current.phase === 'wrapup') {
+    return { tone: 'wrapup', label: 'Wrapping up', branch, detail: `${current.reason} · ${current.graceLeft} calls left`, time }
+  }
+  const outcome = current.outcome ?? 'BLOCKED'
+  const tone: Tone = outcome === 'DONE' ? 'done' : outcome === 'PARTIAL' ? 'partial' : 'blocked'
+  const label = outcome === 'DONE' ? 'Shipped' : outcome === 'PARTIAL' ? 'Partly shipped' : 'Blocked'
+  return { tone, label, branch, detail: current.summary, time }
+}
+
+// One thin ring, the time budget, that fills clockwise; it ends as a filled dot with a mark.
+export function ringSvg(view: RunView): string {
+  const { hex } = TONES[view.tone]
+  const r = 7
+  const length = 2 * Math.PI * r
+  const ended = view.tone === 'done' || view.tone === 'partial' || view.tone === 'blocked'
+  const body = ended
+    ? `<circle cx="9" cy="9" r="8" fill="${hex}"/>` +
+      (view.tone === 'done'
+        ? '<path d="M5.5 9.2l2.3 2.3 4.7-4.9" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>'
+        : view.tone === 'blocked'
+          ? '<path d="M6.5 6.5l5 5m0-5l-5 5" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/>'
+          : '<path d="M5.8 9h6.4" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/>')
+    : `<circle cx="9" cy="9" r="${r}" fill="none" stroke="${hex}" stroke-opacity="0.2" stroke-width="2"/>` +
+      (view.time > 0
+        ? `<circle cx="9" cy="9" r="${r}" fill="none" stroke="${hex}" stroke-width="2" stroke-linecap="round" stroke-dasharray="${Math.max(0.5, length * view.time).toFixed(2)} ${length.toFixed(2)}" transform="rotate(-90 9 9)"/>`
+        : '')
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18" width="18" height="18">${body}</svg>`
+}
+
+// The terminal's mark: Claude's ✻ while it works, then how it ended.
+export function terminalGlyph(view: RunView): string {
+  return view.tone === 'done' ? '✓' : view.tone === 'blocked' ? '✕' : view.tone === 'partial' ? '◐' : '✻'
 }
 
 async function headOf($: $, current: Run): Promise<string> {
@@ -135,7 +199,9 @@ function startTicker($: $): void {
 }
 
 async function tick($: $): Promise<void> {
-  if (run === null || run.phase !== 'active') return
+  if (run === null) return
+  $.ui.invalidate('ui.render')
+  if (run.phase !== 'active') return
   const now = await $.clock.now()
   if (now - run.startedAt >= run.limits.maxHours * 3_600_000) {
     wrapUp(run, `time budget of ${run.limits.maxHours}h is spent`)
@@ -147,7 +213,6 @@ async function tick($: $): Promise<void> {
   if (run.quietWakes >= MAX_QUIET_WAKES) {
     end($, run, 'stopped', 'BLOCKED', `no activity for ${run.limits.maxQuietMinutes} min after ${MAX_QUIET_WAKES} wake-ups`)
     await save($)
-    status($, now)
     clearGoal($)
     return
   }
@@ -244,7 +309,6 @@ export const register: Register = on => {
     }
     end($, run, 'stopped', 'BLOCKED', 'stopped by the user')
     await save($)
-    status($, await $.clock.now())
     clearGoal($)
     return { text: 'Run stopped as BLOCKED. The next tool call is refused and /goal is cleared.' }
   })
@@ -330,7 +394,6 @@ export const register: Register = on => {
     run = fresh
     await save($)
     startTicker($)
-    status($, now)
     return {
       result: `Watchdog on for ${branch}: ${limits.maxHours}h, ${limits.maxIdleCalls} idle calls, ${limits.maxSameFailure} same failures. End the run only through run_finish.`,
     }
@@ -346,7 +409,6 @@ export const register: Register = on => {
     if (run !== null) {
       end($, run, 'ended', outcome, userAction ? `${summary}; you must: ${userAction}` : summary)
       await save($)
-      status($, await $.clock.now())
     }
     return {
       result: `Run recorded as ${outcome}. Make no more tool calls, apart from the app's own end-of-turn wrap-up if it asks for one. End your reply with this exact line:\n${line}`,
@@ -384,7 +446,6 @@ export const register: Register = on => {
       if (current.graceLeft <= 0) {
         end($, current, 'stopped', 'BLOCKED', `watchdog: ${current.reason}, and run_finish was not called`)
         await save($)
-        status($, await $.clock.now())
         clearGoal($)
         return { deny: `Hard stop. ${finalLine('BLOCKED', current.summary)} — end your reply with that line.` }
       }
@@ -417,7 +478,6 @@ export const register: Register = on => {
     }
 
     await save($)
-    status($, now)
     if (current.phase !== 'wrapup' || ran.deny !== undefined) return ran
     return { ...ran, context: [...(ran.context ?? []), wrapUpNotice(current)] }
   }).catch(($, e, next) => {
@@ -426,6 +486,37 @@ export const register: Register = on => {
     const guard = e.tool === 'Bash' ? guardReason(e.command) : undefined
     return guard === undefined ? next(e) : { deny: `goal-orchestrator guard: ${guard}.` }
   })
+
+  // The band: a ring on desktop, Claude's ✻ in the terminal, one line each. It yields to a survey and leaves with the run.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const current = (await $.state.get(RUN)).value ?? null
+    if (current === null || e.props.hasSurvey) return next(e)
+    if (e.surface !== 'terminal' && e.surface !== 'desktop') return next(e)
+    const view = runView(current, await $.clock.now())
+    const color = TONES[view.tone].theme
+    const { Box, Text } = $.ui.resolve(e)
+    const line = (
+      <Text wrap="truncate-end">
+        <Text color={color} weight="medium">{view.label}</Text> <Text mono>{view.branch}</Text>
+        <Text dimColor tabular> · {view.detail}</Text>
+      </Text>
+    )
+    if (e.surface === 'terminal') {
+      return (
+        <Box flexDirection="row" gap="sm">
+          <Text color={color}>{terminalGlyph(view)}</Text>
+          {line}
+        </Box>
+      )
+    }
+    const { Svg } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="row" alignItems="center" gap="sm">
+        <Svg source={ringSvg(view)} alt={`${view.label} ${view.branch}: ${view.detail}`} width={18} height={18} />
+        {line}
+      </Box>
+    )
+  }).catch(($, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
@@ -441,7 +532,6 @@ export const register: Register = on => {
     if (run.phase === 'ended' || run.phase === 'stopped') {
       run = null
       await save($)
-      status($, 0)
       clearGoal($)
     }
     return done
