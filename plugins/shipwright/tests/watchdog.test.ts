@@ -5,6 +5,7 @@ import type { On, SessionMessage } from 'claude-code'
 const START = 'mcp__shipwright__run_start'
 const FINISH = 'mcp__shipwright__run_finish'
 const START_GOAL = 'mcp__shipwright__start_goal'
+const PLAN_STEP = 'mcp__shipwright__plan_step'
 const COMPOSE = { model: 'claude-sonnet-5-5', promptModel: 'claude-sonnet-5-5', surfaces: [], tools: [], outputStyle: null, traits: [] } as const
 const TRANSCRIPT: SessionMessage[] = [{ role: 'user', text: 'ship WAN-1', toolUses: [] }]
 const BAND = {
@@ -15,11 +16,14 @@ const BAND = {
 } as const
 const CONDITION = 'shipwright run for WAN-1. Met when the latest reply ends with a line starting "GOAL: DONE", "GOAL: PARTIAL" or "GOAL: BLOCKED".'
 
-type World = { heads: string[]; goals: string[]; goalClears: number; prompts: string[]; toasts: string[]; failing: Set<string> }
+type World = { heads: string[]; goals: string[]; goalClears: number; prompts: string[]; toasts: string[]; failing: Set<string>; commands: string[]; installed: string[] }
 
 // The world beneath the plugin: git, the UI, /goal, prompts and the tools themselves.
 function world(on: On): World {
-  const w: World = { heads: ['aaa'], goals: [], goalClears: 0, prompts: [], toasts: [], failing: new Set() }
+  const w: World = {
+    heads: ['aaa'], goals: [], goalClears: 0, prompts: [], toasts: [], failing: new Set(), commands: [],
+    installed: ['goal', 'compact', 'shipwright:run', 'mattpocock-skills:wayfinder', 'mattpocock-skills:to-spec', 'mattpocock-skills:to-tickets'],
+  }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('prompt.compose', () => ({ sections: [] }))
   on('turn.complete', ($, e) => ({ text: e.answer }))
@@ -38,6 +42,11 @@ function world(on: On): World {
   on('command.run', { command: 'goal' }, ($, e) => {
     w.goals.push(e.args)
     if (e.args === 'clear') w.goalClears += 1
+    return { text: '' }
+  })
+  on('command.list', () => ({ value: w.installed.map(name => ({ name })) }) as never)
+  on('command.run', ($, e) => {
+    w.commands.push(`/${e.command}${e.args ? ` ${e.args}` : ''}`)
     return { text: '' }
   })
   on('prompt.submit', ($, e) => {
@@ -280,5 +289,81 @@ describe('shipwright goal mode', () => {
     expect((await ended.find({ type: 'Text', text: /^Shipped$/ }))?.props.color).toBe('success')
     expect(String((await ended.find({ type: 'Svg' }))?.props.source)).toContain('M5.5 9.2')
     await ended.unmount()
+  })
+})
+
+const step = ($: Engine, input: Record<string, string>) => $.tool.call({ tool: PLAN_STEP, ...input } as never)
+
+describe('shipwright plan', () => {
+  test('each stage types the next command once the turn is over, then the run starts on a compacted session', async ($, on) => {
+    const clock = mock.clock(on)
+    const w = world(on)
+    const started = await step($, { next: 'wayfinder', goal: 'let users export boards as PDF', run_args: '--auto' })
+    expect(String(started.result)).toMatch(/End your turn now/)
+    expect(w.commands).toEqual([])
+    await clock.advance(1)
+    expect(w.commands).toEqual(['/mattpocock-skills:wayfinder let users export boards as PDF'])
+
+    const [section] = (await $.prompt.compose(COMPOSE as never)).sections
+    expect(section?.id).toBe('shipwright:plan')
+    expect(section?.text).toContain('let users export boards as PDF')
+    expect(section?.text).toContain('Stage: wayfinder.')
+
+    await step($, { next: 'spec' })
+    await clock.advance(1)
+    await step($, { next: 'tickets', issue: '#12' })
+    await clock.advance(1)
+    expect((await $.prompt.compose(COMPOSE as never)).sections[0]?.text).toContain('Stage: tickets (#12)')
+    await step($, { next: 'ship' })
+    await clock.advance(1)
+    expect(w.commands.slice(1)).toEqual([
+      '/mattpocock-skills:to-spec',
+      '/mattpocock-skills:to-tickets #12',
+      expect.stringMatching(/^\/compact Planning is done; #12 and its sub-issues hold the plan/),
+      '/shipwright:run Implement #12 and its sub-issues --auto',
+    ])
+    expect((await $.prompt.compose(COMPOSE as never)).sections).toEqual([])
+  })
+
+  test('a plan can start from a spec or from tickets', async ($, on) => {
+    const clock = mock.clock(on)
+    const w = world(on)
+    await step($, { next: 'tickets', issue: 'WAN-9' })
+    await step($, { next: 'ship' })
+    await clock.advance(1)
+    expect(w.commands).toEqual(['/mattpocock-skills:to-tickets WAN-9', expect.stringMatching(/^\/compact /), '/shipwright:run Implement WAN-9 and its sub-issues'])
+  })
+
+  test('tickets in a local-markdown tracker are handed over as their folder', async ($, on) => {
+    const clock = mock.clock(on)
+    const w = world(on)
+    await step($, { next: 'ship', issue: '.scratch/pdf-export/issues' })
+    await clock.advance(1)
+    expect(w.commands[1]).toBe('/shipwright:run Implement the tickets in .scratch/pdf-export/issues')
+  })
+
+  test('a missing skill, issue or goal is refused and nothing is typed', async ($, on) => {
+    const clock = mock.clock(on)
+    const w = world(on)
+    expect((await step($, { next: 'wayfinder' })).deny).toMatch(/needs goal/)
+    expect((await step($, { next: 'tickets' })).deny).toMatch(/needs issue/)
+    expect((await step($, { next: 'later' })).deny).toMatch(/needs next/)
+    w.installed = ['compact', 'shipwright:run']
+    expect((await step($, { next: 'wayfinder', goal: 'x' })).deny).toMatch(/install the mattpocock-skills plugin/)
+    await clock.advance(1)
+    expect(w.commands).toEqual([])
+    expect((await $.prompt.compose(COMPOSE as never)).sections).toEqual([])
+  })
+
+  test('/shipwright-stop and plan_step stop end a plan', async ($, on) => {
+    mock.clock(on)
+    world(on)
+    await step($, { next: 'wayfinder', goal: 'x' })
+    const stopped = await $.command.run({ command: 'shipwright-stop', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
+    expect(stopped.text).toMatch(/Plan ended/)
+    expect((await $.prompt.compose(COMPOSE as never)).sections).toEqual([])
+    await step($, { next: 'wayfinder', goal: 'x' })
+    await step($, { next: 'stop' })
+    expect((await $.prompt.compose(COMPOSE as never)).sections).toEqual([])
   })
 })

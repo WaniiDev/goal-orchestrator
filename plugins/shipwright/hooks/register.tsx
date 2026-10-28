@@ -1,12 +1,14 @@
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { ActiveGoal, Limits, Outcome, Run } from '../types'
+import type { ActiveGoal, ActivePlan, Limits, Outcome, Run } from '../types'
 
 // Goal mode and exit paths for a shipwright run, enforced in code
 // instead of prose: start_goal (queues /goal and keeps its finish line in the
 // system prompt), run_start / run_finish tools, a progress and budget
 // watchdog, a quiet-run wake-up, /shipwright-stop, a /goal clear on every
-// terminal state, and command guards while a run is active.
+// terminal state, and command guards while a run is active. Before a run,
+// plan_step chains /shipwright:plan's commands: wayfinder, to-spec, to-tickets,
+// then a compaction and /shipwright:run.
 
 type $ = EngineInterface
 
@@ -15,6 +17,12 @@ const GOAL = { plugin: 'shipwright', key: 'goal' } as const
 const START = 'mcp__shipwright__run_start'
 const FINISH = 'mcp__shipwright__run_finish'
 const START_GOAL = 'mcp__shipwright__start_goal'
+const PLAN = { plugin: 'shipwright', key: 'plan' } as const
+const PLAN_STEP = 'mcp__shipwright__plan_step'
+// The command each plan stage runs, by its name without a plugin prefix.
+const STEPS = { wayfinder: 'wayfinder', spec: 'to-spec', tickets: 'to-tickets' } as const
+const NEXT = ['wayfinder', 'spec', 'tickets', 'ship', 'stop'] as const
+type Next = (typeof NEXT)[number]
 /** `/goal`'s own limit on a condition. */
 const MAX_CONDITION = 4000
 /** `/goal clear` and its aliases. */
@@ -277,6 +285,41 @@ const startGoalSpec = {
   },
 }
 
+const planStepSpec = {
+  name: 'plan_step',
+  description:
+    "Move a /shipwright:plan to its next stage: queues that stage's command exactly as if the user typed it, once this turn ends. wayfinder: `/wayfinder <goal>`. spec: `/to-spec`. tickets: `/to-tickets <spec issue>`. ship: `/compact`, then `/shipwright:run Implement <issue> and its sub-issues` (or `Implement the tickets in <folder>` for a local-markdown tracker). stop: ends the plan. Say in one line what comes next, then end your turn.",
+  isDeferred: true,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      next: { type: 'string', enum: NEXT },
+      goal: { type: 'string', description: "wayfinder: the idea in the user's words." },
+      issue: { type: 'string', description: 'tickets: the spec issue. ship: the parent issue whose sub-issues are the tickets, or the folder that holds them for a local-markdown tracker.' },
+      run_args: { type: 'string', description: 'The first plan_step of a plan: extra arguments for /shipwright:run at the end, such as --auto.' },
+    },
+    required: ['next'],
+  },
+}
+
+function planLine(plan: ActivePlan): string {
+  return [
+    'A /shipwright:plan is active in this session: it takes an idea to tickets, then ships them with /shipwright:run.',
+    `The idea: ${plan.goal}`,
+    `Stage: ${plan.stage}${plan.issue ? ` (${plan.issue})` : ''}. When the stage is done, call plan_step (load ${PLAN_STEP} with ToolSearch) with the next stage and end your turn; the plugin runs the next command.`,
+    "- wayfinder, then spec: once the way is clear (wayfinder found no fog, or every map ticket is closed). That is how to proceed; don't ask. If the map still has open tickets, tell the user to work them with /wayfinder <map> and to run /shipwright:plan <map> once the way is clear, then call plan_step with stop.",
+    '- spec, then tickets: once the spec is published, with its issue.',
+    '- tickets, then ship: once the user approved the tickets and they are published as sub-issues of the spec, with the spec issue (or, for a local-markdown tracker, the folder the ticket files are in).',
+    'If a stage cannot go on (no issue tracker set up: /setup-matt-pocock-skills), tell the user and call plan_step with stop.',
+  ].join('\n')
+}
+
+// A plugin's command is listed as `<plugin>:<name>`; take whichever spelling this session has.
+async function commandNamed($: $, name: string): Promise<string | undefined> {
+  const names = (await $.command.list()).map(command => command.name)
+  return names.find(one => one === name) ?? names.find(one => one.endsWith(`:${name}`))
+}
+
 function finishLine(goal: ActiveGoal): string {
   return [
     'A shipwright run is active in this session, in goal mode.',
@@ -292,15 +335,20 @@ export const register: Register = on => {
     await $.tool.register(startGoalSpec)
     await $.tool.register(startSpec)
     await $.tool.register(finishSpec)
+    await $.tool.register(planStepSpec)
     await $.command.register({
       name: 'shipwright-stop',
-      description: 'End the running shipwright run as BLOCKED and clear /goal',
+      description: 'End the running shipwright run as BLOCKED and clear /goal, or end a /shipwright:plan',
     })
     if (run !== null && run.phase !== 'ended' && run.phase !== 'stopped') startTicker($)
     return next(e)
   })
 
   on('command.run', { command: 'shipwright-stop' }, async $ => {
+    if ((await $.state.get(PLAN)).value) {
+      await $.state.set(PLAN, null)
+      if (run === null) return { text: 'Plan ended; nothing more runs.' }
+    }
     if (run === null || run.phase === 'ended' || run.phase === 'stopped') {
       clearGoal($)
       return { text: 'No shipwright run is active; cleared /goal.' }
@@ -332,6 +380,61 @@ export const register: Register = on => {
     }
   }).catch(() => ({ deny: 'start_goal failed inside the shipwright mod; give the user the /goal line from RUN.md to paste.' }))
 
+  on('tool.call', { tool: PLAN_STEP }, async ($, e) => {
+    const input = e as unknown as Record<string, unknown>
+    const text = (key: string) => (typeof input[key] === 'string' ? (input[key] as string).trim() : '')
+    const next = NEXT.find(one => one === input.next) as Next | undefined
+    if (next === undefined) return { deny: `plan_step needs next: one of ${NEXT.join(', ')}.` }
+    const plan = (await $.state.get(PLAN)).value ?? null
+    if (next === 'stop') {
+      await $.state.set(PLAN, null)
+      return { result: 'Plan ended. Tell the user where it stopped and what to run next.' }
+    }
+    if (next === 'wayfinder' && text('goal') === '') return { deny: "plan_step wayfinder needs goal: the idea in the user's words." }
+    const issue = text('issue') || (plan?.issue ?? '')
+    if ((next === 'tickets' || next === 'ship') && issue === '') return { deny: `plan_step ${next} needs issue.` }
+    // A plan can start at any stage: from an idea, a cleared map, a spec or published tickets.
+    const extra = text('run_args') || (plan?.runArgs ?? '')
+
+    if (next === 'ship') {
+      const ship = await commandNamed($, 'shipwright:run')
+      if (ship === undefined) return { deny: '/shipwright:run is not in this session; reload the plugin.' }
+      const runArgs = extra ? ` ${extra}` : ''
+      // A local-markdown tracker's tickets are files in a folder, not sub-issues.
+      const work = /[\\/]|\.md$/.test(issue) ? `the tickets in ${issue}` : `${issue} and its sub-issues`
+      await $.state.set(PLAN, null)
+      // Queued in order for when the session is idle: the run starts from the tickets, not the planning talk.
+      $.clock.after(0, () => {
+        void (async () => {
+          await $.command
+            .run({ command: 'compact', args: `Planning is done; ${work} hold the plan. Keep only the idea, where the tickets are, and any decision not written in them.` })
+            .catch(() => undefined)
+          await $.command.run({ command: ship, args: `Implement ${work}${runArgs}` })
+        })().catch(() => {
+          $.ui.toast(`shipwright: /shipwright:run could not start. Type /shipwright:run Implement ${work}.`)
+        })
+      })
+      return { result: `Queued /compact, then /shipwright:run Implement ${work}${runArgs}. They start when this turn ends. End your turn now.` }
+    }
+
+    const command = await commandNamed($, STEPS[next])
+    if (command === undefined) {
+      return { deny: `/${STEPS[next]} is not in this session: install the mattpocock-skills plugin, run /setup-matt-pocock-skills once in this repo, then try again.` }
+    }
+    const fresh: ActivePlan =
+      next === 'wayfinder' || plan === null
+        ? { stage: next, goal: text('goal') || issue, issue: next === 'wayfinder' ? '' : issue, runArgs: extra }
+        : { ...plan, stage: next, issue, runArgs: extra }
+    await $.state.set(PLAN, fresh)
+    const args = next === 'wayfinder' ? fresh.goal : next === 'tickets' ? issue : ''
+    $.clock.after(0, () => {
+      void $.command.run({ command, args }).catch(() => {
+        $.ui.toast(`shipwright: /${command} could not start. Type it yourself.`)
+      })
+    })
+    return { result: `Queued /${command}${args ? ` ${args}` : ''}: it starts when this turn ends. End your turn now.` }
+  }).catch(() => ({ deny: 'plan_step failed inside the shipwright mod; tell the user which command to run next.' }))
+
   // `/goal clear`, or a /goal for something else, ends this run's hold on the finish line.
   on('command.run', { command: 'goal' }, async ($, e, next) => {
     const args = e.args.trim()
@@ -346,16 +449,22 @@ export const register: Register = on => {
   on('prompt.compose', async ($, e, next) => {
     const composed = await next(e)
     const goal = (await $.state.get(GOAL)).value ?? null
-    if (goal === null) return composed
-    return { ...composed, sections: [...composed.sections, { id: 'shipwright:finish-line', text: finishLine(goal), scope: 'session' }] }
+    const plan = (await $.state.get(PLAN)).value ?? null
+    if (goal === null && plan === null) return composed
+    const sections = [...composed.sections]
+    if (goal !== null) sections.push({ id: 'shipwright:finish-line', text: finishLine(goal), scope: 'session' })
+    if (plan !== null) sections.push({ id: 'shipwright:plan', text: planLine(plan), scope: 'session' })
+    return { ...composed, sections }
   })
 
   // Some surfaces put session sections in the first message, which a compaction summarizes away: the summary
   // keeps the finish line too. A subagent's compaction is its own.
   on('session.compact', async ($, e, next) => {
     const goal = e.agentId === undefined ? ((await $.state.get(GOAL)).value ?? null) : null
-    if (goal === null) return next(e)
-    const keep = `Keep this in the summary, word for word:\n${finishLine(goal)}`
+    const plan = e.agentId === undefined ? ((await $.state.get(PLAN)).value ?? null) : null
+    if (goal === null && plan === null) return next(e)
+    const lines = [goal && finishLine(goal), plan && planLine(plan)].filter(Boolean).join('\n\n')
+    const keep = `Keep this in the summary, word for word:\n${lines}`
     return next({ ...e, instructions: e.instructions ? `${e.instructions}\n\n${keep}` : keep })
   }).catch(($, e, next) => next(e))
 
@@ -415,7 +524,7 @@ export const register: Register = on => {
 
   // Every other tool call: the guards, the terminal lock, and the watchdog.
   on('tool.call', async ($, e, next) => {
-    if (e.tool === START || e.tool === FINISH || e.tool === START_GOAL || String(e.tool).startsWith(TURN_TOOLS) || run === null) {
+    if (e.tool === START || e.tool === FINISH || e.tool === START_GOAL || e.tool === PLAN_STEP || String(e.tool).startsWith(TURN_TOOLS) || run === null) {
       return next(e)
     }
     const current = run

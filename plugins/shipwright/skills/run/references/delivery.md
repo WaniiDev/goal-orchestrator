@@ -25,6 +25,8 @@ Final gate on `<sha>` (<environment>):
 | Command | Result |
 | --- | --- |
 
+Still failing (a red gate only, from `gate.failures`): <each problem and its files>
+
 Checked by hand: <each `untestable` item and each lane note (`lanes[].notes`) from the ship result, and how it was checked, or "None">
 
 Reviews: <rounds run; the findings fixed (`fixed`); each finding still open (`open`) and each nit (`reviews[].nits`), with why it stays>
@@ -40,6 +42,8 @@ Lane notes and nits are as of their lane or round, and a later fix may have clos
 - After the merge, any follow-up work starts from the latest default branch.
 
 ## Tracker
+Reach it the way the repo does; `docs/agents/issue-tracker.md` says which, if the repo has one. A connector (Linear, Jira), `gh` for GitHub Issues, `glab` for GitLab, or the issue files themselves for a local-markdown tracker (a checkpoint is a dated section appended to the file, and the state its `Status:` line). With none of these, skip the tracker and say so in the results.
+Along the way, not only at the end: In Progress with a checkpoint at the plan, a checkpoint per issue when the ship result arrives, In Review with the PR, Done after the merge. Skip all of it when `RUN.md`'s `defaults:` drops tracker updates.
 - Tick only the Done-when items that are met and verified. Never add progress logs to the description.
 - Post one checkpoint per issue in the repo's format; lint it first if the repo ships a linter. Typical sections: State, Done, Next, Verify (`` `cmd` — pass|fail|skipped, detail ``), Branch, Watch out.
 - States: In Progress while working, In Review with an open PR, Done only after the merge (or as the repo's rules say). Link the PR.

@@ -209,6 +209,8 @@ const plan = args
 if (!plan || !plan.repo || !plan.branch || !plan.base || !plan.brief || !Array.isArray(plan.waves) || plan.waves.length === 0) {
   return {
     outcome: 'BLOCKED',
+    // The run skill fixes the plan and relaunches on `error`.
+    error: 'the plan needs repo, branch, base, brief and at least one wave',
     summary: 'The ship workflow runs the plan /shipwright:run writes (repo, branch, base, brief, waves); start it from there.',
   }
 }
@@ -418,10 +420,15 @@ async function runLane(lane, wave, contract, phaseTitle = 'Build', after = []) {
     let gaps = reportGaps(lane, report)
     let check = null
     if (gaps.length === 0) {
-      check = await call(
-        checkPrompt(lane, tree, files, contract, report),
-        opts('integrator', `${lane.id} check`, phaseTitle, verifySchema(files)),
-      )
+      const recheck = again =>
+        call(checkPrompt(lane, tree, files, contract, report), opts('integrator', `${lane.id} check${again ? ' again' : ''}`, phaseTitle, verifySchema(files)))
+      check = await recheck(false)
+      // A re-check that died says nothing about the lane: ask again rather than rebuild it.
+      if (check === null && !stopped) check = await recheck(true)
+      if (check === null) {
+        log(`Lane ${lane.id} dropped: its claims could not be re-checked.`)
+        return { id: lane.id, issues: lane.issues, status: 'dropped', gaps: ['the claims could not be re-checked'], report, attempts: attempt }
+      }
       gaps = checkGaps(lane, wave, files, report, check)
     }
     let premerge = []
@@ -433,6 +440,11 @@ async function runLane(lane, wave, contract, phaseTitle = 'Build', after = []) {
       const found = review ? review.findings : []
       gaps = found.filter(blocking).map(describe)
       premerge = found.filter(finding => !blocking(finding))
+      if (!review) {
+        // No answer is not a clean review: the wave review is told to start with this lane.
+        log(`Lane ${lane.id}: its pre-merge review did not run.`)
+        premerge = [{ severity: 'should', file: `lane-${lane.id}`, problem: 'its high-risk pre-merge review did not run', fix: 'review this lane first, as a pre-merge review would' }]
+      }
     }
     if (gaps.length === 0) {
       const outside = (check.outsideFiles || []).filter(file => !ownsFile(lane, file))
@@ -654,6 +666,41 @@ const gatePrompt = label =>
 
 const isGreen = gate => Boolean(gate) && gate.checks.length > 0 && gate.checks.every(c => c.pass)
 
+// What would only surface mid-build, as retries: caught before any agent runs, for the run skill to fix.
+function planProblems() {
+  const problems = []
+  const seen = new Set()
+  plan.waves.forEach((wave, i) => {
+    const w = i + 1
+    if (!wave || !Array.isArray(wave.lanes) || wave.lanes.length === 0) return problems.push(`wave ${w} has no lanes`)
+    for (const lane of wave.lanes) {
+      const name = lane && lane.id ? `lane ${lane.id}` : `a lane in wave ${w}`
+      if (!lane || !lane.id) problems.push(`${name} has no id`)
+      else if (seen.has(lane.id)) problems.push(`lane id ${lane.id} is used twice`)
+      else seen.add(lane.id)
+      for (const field of ['issues', 'doneWhen', 'owns']) {
+        if (!lane || !Array.isArray(lane[field]) || lane[field].length === 0) problems.push(`${name} has no ${field}`)
+      }
+    }
+    const lanes = wave.lanes.filter(lane => lane && Array.isArray(lane.owns))
+    lanes.forEach((lane, j) => {
+      for (const other of lanes.slice(j + 1)) {
+        const shared = lane.owns.filter(file => ownsFile(other, file)).concat(other.owns.filter(file => ownsFile(lane, file)))
+        if (shared.length) problems.push(`lanes ${lane.id} and ${other.id} of wave ${w} both own ${[...new Set(shared)].join(', ')}; move one to a later wave`)
+      }
+    })
+  })
+  return problems
+}
+const problems = planProblems()
+if (problems.length) {
+  return {
+    outcome: 'BLOCKED',
+    error: `the plan has problems: ${problems.join('; ')}`,
+    summary: 'Fix the plan and launch the ship workflow again.',
+  }
+}
+
 const planned = plan.waves.flatMap(wave => wave.lanes)
 // Every lane that ran, fix lanes included, with the round that made it.
 const lanes = []
@@ -664,11 +711,17 @@ const questions = []
 const untestable = []
 let head = plan.base
 let stopped = ''
+// The final review covers a one-wave goal's diff, so that wave gets no review of its own; what it would have been told rides along.
+const carried = []
+// The final audits the screens again only if no wave audited them, or something changed or stayed open after the last audit.
+let audited = false
+let uiAgain = false
 const shippedNow = () => planned.filter(lane => lanes.some(done => done.id === lane.id && done.merged))
 
 for (let i = 0; i < plan.waves.length; i++) {
   const wave = plan.waves[i]
   const w = i + 1
+  if (stopped) break
   if (budgetLow()) {
     stopped = `token budget nearly spent before wave ${w}`
     log(`Stopped: ${stopped}.`)
@@ -691,6 +744,10 @@ for (let i = 0; i < plan.waves.length; i++) {
 
   const shippedCode = wave.lanes.filter(lane => isCode(lane) && built.merged.has(lane.id))
   if (shippedCode.length === 0) continue
+  if (plan.waves.length === 1) {
+    carried.push(handOff(landed, NO_CONTRACT))
+    continue
+  }
   phase('Review')
   const scope = list(shippedCode.map(lane => `${lane.issues.join(', ')}: ${lane.doneWhen.join('; ')}`))
   const later = plan.waves.slice(i + 1).flatMap(next => next.lanes)
@@ -702,9 +759,14 @@ for (let i = 0; i < plan.waves.length; i++) {
   ]
     .filter(Boolean)
     .join('\n')
-  const found = await review(`wave ${w}`, `${before}..${head}`, scope, extra, shippedCode.some(lane => lane.ui), 'Review')
+  const withUi = shippedCode.some(lane => lane.ui)
+  const found = await review(`wave ${w}`, `${before}..${head}`, scope, extra, withUi, 'Review')
   const fixed = await fix(`wave ${w} review`, found.findings, 'Review')
   if (fixed.head) head = fixed.head
+  if (withUi && plan.ui) {
+    audited = true
+    uiAgain = fixed.open.length > 0 || fixed.merged.length > 0
+  } else if (fixed.merged.length) uiAgain = true
   open.push(...fixed.open)
   closed.push(...fixed.closed)
   reviews.push(summary(`wave ${w}`, found.findings, fixed))
@@ -730,9 +792,10 @@ for (let round = 1; FULL.length > 0 && !stopped; round++) {
   }))
   const fixed = await fix(`gate ${round}`, failures, 'Final gate')
   if (fixed.head) head = fixed.head
+  if (fixed.merged.length) uiAgain = true
   closed.push(...fixed.closed)
+  open.push(...fixed.open)
   if (fixed.merged.length === 0) {
-    open.push(...fixed.open)
     log('Final gate: no fix merged, so the gate stops here.')
     break
   }
@@ -747,10 +810,11 @@ if (isGreen(gate)) {
     untestable.length ? `No automated test proves these, so check each by hand:\n${list(untestable)}` : '',
     // No wave review saw what the fix lanes left: their notes and their edits outside what they own.
     handOff(lanes.filter(lane => lane.merged && !planned.some(entry => entry.id === lane.id)), NO_CONTRACT),
+    ...carried,
   ]
     .filter(Boolean)
     .join('\n')
-  const final = await review('the whole diff', `${plan.base}..${head}`, scope, extra, Boolean(plan.ui), 'Final gate')
+  const final = await review('the whole diff', `${plan.base}..${head}`, scope, extra, Boolean(plan.ui) && (!audited || uiAgain), 'Final gate')
   const fixed = await fix('final review', final.findings, 'Final gate')
   if (fixed.head) head = fixed.head
   closed.push(...fixed.closed)
@@ -805,7 +869,7 @@ return {
   // Done-when items of shipped lanes that no automated test proves: for the PR's manual checks.
   untestable,
   reviews,
-  gate: gate ? { green, checks: gate.checks } : { green: false, checks: [], note: FULL.length ? 'the gate did not run' : 'the plan lists no checks' },
+  gate: gate ? { green, checks: gate.checks, failures: green ? [] : gate.failures || [] } : { green: false, checks: [], note: FULL.length ? 'the gate did not run' : 'the plan lists no checks' },
   // Findings whose fix lanes merged, every round's; nits get no fix lane, so they are in reviews.
   fixed: closed.map(describe),
   open: open.map(describe),

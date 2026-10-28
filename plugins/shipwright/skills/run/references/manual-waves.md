@@ -6,7 +6,15 @@ Only for a session without the `Workflow` tool. You drive what the ship workflow
 
 For each lane:
 1. `git worktree add -b lane-<id> <repo>/.claude/worktrees/lane-<id> <feature-branch>`. Don't use `isolation: "worktree"`: it branches from the default branch. Copy in any untracked local test config the lane needs.
-2. Launch `Agent` with `subagent_type: "shipwright:implementer"`, `name: "lane-<id>"`, and `model` and `effort` from `RUN.md`; it runs in the background. The prompt holds only: the worktree path, the `BRIEF.md` path, the issue(s) and Done-when items, owned files and files to avoid, the DB and port, and the e2e filter. The agent definition carries its rules and report format.
+2. Launch `Agent` with `subagent_type: "shipwright:implementer"`, `name: "lane-<id>"`, and `model` and `effort` from `RUN.md`; it runs in the background. The prompt holds only: the worktree path, the `BRIEF.md` path, the issue(s) and Done-when items, owned files and files to avoid, the DB and port, the e2e filter, and this report format (the agent definition carries its rules):
+   ```
+   LANE <id> done|partial|blocked <sha…>
+   FILES <path>, …
+   DONE-WHEN <item>: met|not met — <proof>        (one line each)
+   CHECK `<cmd>` pass|fail <counts>               (one line each)
+   DECISIONS <one line each | none>
+   OPEN <unfinished and why | none>
+   ```
 3. While lanes run, prepare the next wave. Don't duplicate their work.
 
 When a lane reports:

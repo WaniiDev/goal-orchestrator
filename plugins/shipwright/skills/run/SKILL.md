@@ -15,6 +15,15 @@ Read each reference only at its step: [intake](references/intake.md) (0), [brief
 
 **State** lives in the scratchpad (else `.shipwright/` in the session temp dir): `RUN.md` (choices, plan, the workflow's run ID and transcript folder, gate results), `DECISIONS.md` (one line per decision: what, why, which source), `BRIEF.md`, `reports/`. After a compaction, re-read `RUN.md` first. After a container restart, restart services (for example the DB).
 
+## Every run
+
+Without being told, every run:
+- **Goes in one go**: from the intake to the finish line without stopping. Never ask "shall I continue?", wait for a go-ahead on the plan, or split the goal into several runs or sessions. Around mode still asks only what Step 0 allows.
+- **Runs in parallel**: wide recon sweeps go to several Explore agents at once, each wave holds as many lanes as have disjoint files, and independent checks and tracker updates go out together.
+- **Updates the issues along the way** (whenever the run can reach the tracker; see [delivery](references/delivery.md)), following [delivery](references/delivery.md)'s Tracker rules: In Progress with the plan (Step 2), a checkpoint per issue when the ship result arrives (Step 3), In Review with the PR and Done after the merge (Step 4).
+
+The intake's "How to run" question can leave each one out, and so can the user's words ("no tracker updates", "one lane at a time"); `RUN.md`'s `defaults:` line holds what stays on.
+
 ## Step 0: Intake
 
 Follow [intake](references/intake.md).
@@ -47,11 +56,11 @@ On every turn of a run (after `/goal` starts one, a compaction, a resume or the 
 3. Environment: a test DB (native; no Docker unless the repo requires it), a browser for e2e, network access, and how each agent gets its own DB and port.
 4. Create or check out the feature branch (the session's designated branch if given), push it, and run `git config rerere.enabled true`. Note its base: `git merge-base <default-branch> <feature-branch>`.
 5. Run the fast checks once on the base. List any failures in `BRIEF.md` as pre-existing, so agents don't re-prove them. If the install leaves files git doesn't ignore (a linked `node_modules` slips past a `node_modules/` pattern), add them once to `$(git rev-parse --git-common-dir)/info/exclude`, which every worktree shares; agents don't write git's shared files.
-6. Call `run_start` (branch, absolute repo path, any budget the user gave).
+6. Call `run_start` (branch, absolute repo path, `max_hours` from `RUN.md`'s `budget:`).
 
 ## Step 2: Plan
 
-- A **lane** is one issue (or a tight group) that one implementer owns end to end, with named files. A **wave** is 3–5 lanes with disjoint files. Order by dependency: schema and server before UI, shared primitives before the screens that use them; a lane that needs another lane's code goes in a later wave. Docs-only and test-only lanes ride along.
+- A **lane** is one issue (or a tight group) that one implementer owns end to end, with named files. A **wave** is as many lanes as have disjoint files (one lane per wave when `defaults:` drops parallel). Order by dependency: schema and server before UI, shared primitives before the screens that use them; a lane that needs another lane's code goes in a later wave. Docs-only and test-only lanes ride along.
 - You write no product code: shared code (types, primitives, scaffolding) is a lane of an early wave, so it gets contract tests and a review like the rest. Before launching, check each wave: no lane's Done-when items need code that another lane of the same wave owns.
 - Write `BRIEF.md` from the [template](references/brief-template.md). It is the distilled repo profile that every agent reads instead of the steering docs.
 - Write the plan into `RUN.md` as the workflow's input:
@@ -68,14 +77,15 @@ On every turn of a run (after `/goal` starts one, a compaction, a resume or the 
     "ui": { "reference": "<design reference, if any>", "standard": "<house design rules>", "sizes": "<sizes and locales>", "areas": [{ "name": "<lists | dialogs | motion>", "db": "<db>", "port": 5181 }] }
   }
   ```
-  `models` holds the intake's choices. `kind` defaults to `code`; `risk: "high"` (auth, money, data loss, migrations) adds a review before that lane merges; `ui: true` marks lanes the UI audits cover. Give every goal with screens a `ui`, even with no design reference: leave `reference` out and the auditors check the screen's Done-when items at each size (`sizes` defaults to desktop 1280×720 and phone 390×844). `areas` splits the audits, one auditor per area with its own DB and port; with none, one auditor covers every screen. Leave `ui` out only for goals without screens. Optional: `limits` (`laneRetries` 2, `gateRounds` 2), `"contract": false` to skip contract tests, `models.integrator`.
+  `models` holds the intake's choices. `kind` defaults to `code`; `risk: "high"` (auth, money, data loss, migrations) adds a review before that lane merges; `ui: true` marks lanes the UI audits cover. Give every goal with screens a `ui`, even with no design reference: leave `reference` out and the auditors check the screen's Done-when items at each size (`sizes` defaults to desktop 1280×720 and phone 390×844). `areas` splits the audits, one auditor per area with its own DB and port; with none, one auditor covers every screen. Leave `ui` out for goals without screens, or when `RUN.md` says `ui: skip`; `ui: desktop` sets `sizes` to desktop 1280×720 only. Optional: `limits` (`laneRetries` 2, `gateRounds` 2), `"contract": false` when `defaults:` drops contract, `models.integrator`.
 - In the session's task list: "Ship" (one item; the workflow shows its own progress) and "Deliver".
+- Unless `RUN.md` turns tracker updates off: move each issue to In Progress and post a checkpoint naming its lane and wave. Read [delivery](references/delivery.md)'s Tracker section for the format.
 
 ## Step 3: Ship
 
 1. Launch `Workflow` with `name: "shipwright:ship"` and `args`: the plan object itself, not a JSON string. If that name isn't found, pass `scriptPath`: `workflows/ship.js` two folders above this skill's base directory. If the result has `error`, fix the plan and relaunch. Note the `runId` and `transcriptDir` in `RUN.md`.
-2. Per wave, the workflow has failing contract tests written from the Done-when items, runs one implementer per lane in its own worktree, re-runs every claim, sends exact gaps back (at most 2 retries, then the lane is dropped), merges (a lane that waited for another lane of its wave builds again once that one merges), reviews (UI audits included) and turns findings into fix lanes. Then the final gate, with up to 2 fix rounds, and a whole-diff review. Don't poll it and don't duplicate its work: end your turn with the line `Waiting for the ship workflow.`; the result arrives as a task notification. If anything wakes you before it (a goal check-in, the watchdog), answer with that line again and no tool calls.
-3. When the result arrives, first save it verbatim to `reports/ship.json` (the report skill reads it). Then add to `RUN.md` (keep the run ID and transcript folder: a resume needs them) the head, the gate checks, what shipped and what didn't and why, the `untestable` items, and the findings fixed (`fixed`) and still open (`open`), and `tokens`; append every lane's decisions, fix lanes included, to `DECISIONS.md`.
+2. Per wave, the workflow has failing contract tests written from the Done-when items, runs one implementer per lane in its own worktree, re-runs every claim, sends exact gaps back (at most 2 retries, then the lane is dropped), merges (a lane that waited for another lane of its wave builds again once that one merges), reviews (UI audits included) and turns findings into fix lanes. Then the final gate, with up to 2 fix rounds, and a whole-diff review. Don't poll it and don't duplicate its work: end your turn with the line `Waiting for the ship workflow.`; the result arrives as a task notification. If a goal check-in or the watchdog's quiet-run notice wakes you before it, answer with that line again and no tool calls. The watchdog's wrap-up notice is different (a budget is spent; it says to stop the ship workflow): stop the workflow with `TaskStop`, then go to Step 4 with what it finished, as `PARTIAL`. Read what merged from the branch (`git log <base>..<branch>`) and the rest from `journal.jsonl` in its `transcriptDir`.
+3. When the result arrives, first save it verbatim to `reports/ship.json` (the report skill reads it). Then add to `RUN.md` (keep the run ID and transcript folder: a resume needs them) the head, the gate checks (and `gate.failures` if it stayed red), what shipped and what didn't and why, the `untestable` items, and the findings fixed (`fixed`) and still open (`open`), and `tokens`; append every lane's decisions, fix lanes included, to `DECISIONS.md`. Unless tracker updates are off, post a checkpoint on each issue: shipped (with the checks that prove it) or not shipped and why.
 4. `questions` (around mode): ask the user, add each answer to its lane as `"answers": [...]`, and relaunch with `resumeFromRunId`; finished agents return their saved results. Relaunch the same way if the run was cut off.
 5. Open security findings are never dropped: fix them, ask (around), or put them first in the PR (away).
 6. One ship run per goal: don't start another for lanes that didn't ship. They go in the PR and the results as not shipped, with the reasons.
@@ -85,7 +95,7 @@ Without a `Workflow` tool (workflows off), run [manual waves](references/manual-
 ## Step 4: Deliver
 
 Follow [delivery](references/delivery.md):
-1. Open the PR (if the finish line includes it): Issues from `shipped`, the gate's checks, the decisions; for `PARTIAL`, a draft PR that lists `notShipped` with the reasons and the open findings.
+1. Open the PR (if the finish line includes it): Issues from `shipped`, the gate's checks, the decisions; for `PARTIAL`, a draft PR that lists `notShipped` with the reasons, the open findings, and a red gate's `gate.failures`.
 2. Drive CI to green, then merge if the finish line says so.
 3. Update the tracker.
 4. If Step 0a measured usage, call `get_usage` again and write `usage.after` into `RUN.md` the same way. Then read [report](../report/SKILL.md) as a file (only the user can invoke it as a skill) and write the final results in its format.
@@ -103,13 +113,7 @@ Start from the workflow's `outcome`; delivery can lower it, never raise it. Fini
 
 Before `run_finish`, in order: push, update `RUN.md`, `DECISIONS.md` and the PR or draft PR, remove the worktrees. After `run_finish`, make no more tool calls (the app's own end-of-turn wrap-up excepted), and end the reply with the `GOAL: …` line it returns. In away mode a block is not a question: finish, and the user reads the line when they're back.
 
-The plugin's mod enforces this:
-- **Progress** is a new commit on the feature branch or an agent report; an agent at work keeps the run from looking quiet.
-- **Wrap-up** starts after no progress: 60 orchestrator tool calls, the same command failing 3 times, the 8 h budget, or 45 quiet minutes twice. The mod then refuses new agents and workflows.
-- **Hard stop as `BLOCKED`** if `run_finish` doesn't come within 15 more calls.
-- **Every terminal state clears `/goal`.** The user can end a run with `/shipwright-stop`.
-
-If `run_start` doesn't exist (Claude Code before v2.1.287, or mods off), apply these rules yourself and end with `GOAL: DONE|PARTIAL|BLOCKED — <summary>`.
+The plugin's mod enforces this with a watchdog and says what to do when one of its limits trips; follow its notices. Without `run_start` (Claude Code before v2.1.287, or mods off), wrap up yourself after 60 tool calls with no new commit, the same command failing 3 times, or the time budget, and end with `GOAL: DONE|PARTIAL|BLOCKED — <summary>`.
 
 ## Progress
 

@@ -39,8 +39,22 @@ export type ActiveGoal = {
   setAt: number
 }
 
+/** wayfinder: chart the way · spec: write the spec · tickets: split it into tickets · ship is never stored: it hands over to the run. */
+export type PlanStage = 'wayfinder' | 'spec' | 'tickets'
+
+/** A plan `/shipwright:plan` is taking from an idea to tickets, as `plan_step` last moved it. */
+export type ActivePlan = {
+  stage: PlanStage
+  /** The idea in the user's words, as the plan started. */
+  goal: string
+  /** The issue the stage works from (the map or the spec), once there is one. */
+  issue: string
+  /** Extra arguments for `/shipwright:run` (`--auto`). */
+  runArgs: string
+}
+
 declare module 'claude-code' {
   interface PluginState {
-    'shipwright': { run: Run | null; goal: ActiveGoal | null }
+    'shipwright': { run: Run | null; goal: ActiveGoal | null; plan: ActivePlan | null }
   }
 }
