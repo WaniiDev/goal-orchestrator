@@ -25,7 +25,8 @@ Final gate on `<sha>` (<environment>):
 | Command | Result |
 | --- | --- |
 
-Still failing (a red gate only, from `gate.failures`): <each problem and its files>
+Still failing (from `gate.failures`: a red gate's failures, or a green gate's must and security findings still open; then any `foreign` failures): <each problem and its files>
+Blocked (from `blocked`): <each Done-when item left because a lane it needs didn't ship, or "None">
 
 Checked by hand: <each `untestable` item and each lane note (`lanes[].notes`) from the ship result, and how it was checked, or "None">
 

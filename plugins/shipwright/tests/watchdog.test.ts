@@ -85,7 +85,7 @@ describe('shipwright watchdog', () => {
     expect((await bash($, 'bun test')).deny).toBeUndefined()
   })
 
-  test('run_finish ends the run, locks tools, then clears /goal at turn end', async ($, on) => {
+  test('run_finish ends the run and locks tools; at turn end /goal is left to clear itself on the GOAL line', async ($, on) => {
     const clock = mock.clock(on)
     const w = world(on)
     await begin($)
@@ -97,7 +97,7 @@ describe('shipwright watchdog', () => {
 
     await mainTurnEnds($)
     await clock.advance(1)
-    expect(w.goalClears).toBe(1)
+    expect(w.goalClears).toBe(0)
     expect((await bash($, 'pkill -f vite')).deny).toBeUndefined()
   })
 
@@ -255,7 +255,7 @@ describe('shipwright goal mode', () => {
     expect((await $.prompt.compose(COMPOSE as never)).sections).toEqual([])
   })
 
-  test("the run's end clears the goal and drops the finish line", async ($, on) => {
+  test("the run's end drops the finish line and leaves /goal to clear itself on the GOAL line", async ($, on) => {
     const clock = mock.clock(on)
     const w = world(on)
     await $.tool.call({ tool: START_GOAL, condition: CONDITION, run_file: '/state/RUN.md' } as never)
@@ -264,7 +264,7 @@ describe('shipwright goal mode', () => {
     await $.tool.call({ tool: FINISH, outcome: 'DONE', summary: 'branch pushed' } as never)
     await mainTurnEnds($)
     await clock.advance(1)
-    expect(w.goals).toEqual([CONDITION, 'clear'])
+    expect(w.goals).toEqual([CONDITION])
     expect((await $.prompt.compose(COMPOSE as never)).sections).toEqual([])
   })
 
@@ -340,6 +340,15 @@ describe('shipwright plan', () => {
     await step($, { next: 'ship', issue: '.scratch/pdf-export/issues' })
     await clock.advance(1)
     expect(w.commands[1]).toBe('/shipwright:run Implement the tickets in .scratch/pdf-export/issues')
+  })
+
+  test('tickets in a folder are handed over with the spec they came from', async ($, on) => {
+    const clock = mock.clock(on)
+    const w = world(on)
+    await step($, { next: 'tickets', issue: '.scratch/pdf-export/spec.md' })
+    await step($, { next: 'ship', issue: '.scratch/pdf-export/issues' })
+    await clock.advance(1)
+    expect(w.commands[2]).toBe('/shipwright:run Implement the tickets in .scratch/pdf-export/issues (spec: .scratch/pdf-export/spec.md)')
   })
 
   test('a missing skill, issue or goal is refused and nothing is typed', async ($, on) => {

@@ -128,10 +128,10 @@ test('a clean run writes the contract first, ships every lane and ends DONE', as
   assert.match(prompt('board build'), /Report at least these checks: npm run typecheck · npm test\./)
   assert.match(prompt('wave 1 contract'), /worktree add -b contract-wave-1/)
   assert.match(prompt('wave 1 contract'), /no dynamic imports, type copies or any-casts/)
-  assert.match(
-    prompt('wave 1 contract'),
-    /a missing module or export counts; a syntax, type or config error in the tests themselves doesn't\. Write no feature code and change no config\./,
-  )
+  assert.match(prompt('wave 1 contract'), /a missing module or export counts; a syntax, type or config error in the tests themselves doesn't\./)
+  assert.match(prompt('wave 1 contract'), /Write no feature code and change no config\./)
+  assert.match(prompt('wave 1 contract'), /never assert a page-wide count or that an element is the only one of its role/)
+  assert.match(prompt('wave 1 contract'), /don't install or fetch one to run them/)
   assert.doesNotMatch(prompt('wave 1 contract'), /typecheck/)
   assert.match(prompt('wave 1 review'), /git diff base-sha\.\.head after wave 1 merge/)
   assert.equal(result.head, 'gate-head')
@@ -158,22 +158,18 @@ test('each role keeps its own model and effort', async () => {
   for (const call of defaults.calls) assert.ok(!('model' in call) && !('effort' in call), call.label)
 })
 
-test('UI lanes get one audit per area, on the reviewer model unless the auditor has its own', async () => {
-  const waves = structuredClone(PLAN.waves)
-  waves[0].lanes[0].ui = true
+test('the screens are audited once, at the final gate, one auditor per area on the reviewer model', async () => {
   const ui = { reference: 'docs/design.png', standard: 'house', areas: [{ name: 'board' }, { name: 'menus' }] }
-  const { calls, labels } = await ship(plan({ waves, ui }))
+  const { calls, labels } = await ship(plan({ ui }), { 'gate 1': red('line clear is off by one', ['src/board.ts']) })
   const audits = calls.filter(call => call.agentType === 'shipwright:ui-auditor')
-  assert.deepEqual(audits.map(call => call.label), ['wave 1 audit board', 'wave 1 audit menus'])
+  assert.deepEqual(audits.map(call => call.label), ['the whole diff audit board', 'the whole diff audit menus'])
   for (const call of audits) assert.deepEqual([call.model, call.effort], ['opus', 'xhigh'])
   assert.ok(labels.includes('wave 1 review'))
 })
 
 test('a UI goal whose plan names no areas is still audited', async () => {
-  const waves = structuredClone(PLAN.waves)
-  waves[0].lanes[0].ui = true
-  const { labels } = await ship(plan({ waves, ui: { areas: [] } }))
-  assert.ok(labels.includes('wave 1 audit screens'))
+  const { labels } = await ship(plan({ ui: { areas: [] } }))
+  assert.ok(labels.includes('the whole diff audit screens'))
 })
 
 test('a one-wave goal is reviewed and audited once, by the final review, which gets what the wave review would have', async () => {
@@ -189,26 +185,9 @@ test('a one-wave goal is reviewed and audited once, by the final review, which g
   assert.match(prompt('the whole diff review'), /GAME-1: its pre-merge review noted: should src\/board\.ts — tick\(\) allocates every frame/)
 })
 
-test('the final audits the screens again only when something changed or stayed open after the last audit', async () => {
-  const waves = structuredClone(PLAN.waves)
-  waves[0].lanes[0].ui = true
-  const ui = { areas: [{ name: 'board' }] }
-  const clean = await ship(plan({ waves, ui }))
-  assert.ok(!clean.labels.includes('the whole diff audit board'))
-  const fixedLater = await ship(plan({ waves, ui }), { 'gate 1': red('line clear is off by one', ['src/board.ts']) })
-  assert.ok(fixedLater.labels.includes('the whole diff audit board'))
-  const leftOpen = await ship(plan({ waves, ui }), {
-    'wave 1 audit board': { findings: [{ severity: 'must', file: 'src/board.tsx', problem: 'the board is cut off on a phone', fix: 'let it scale' }] },
-    'wave-1-review-fix1 check': failing('1 failed'),
-  })
-  assert.ok(leftOpen.labels.includes('the whole diff audit board'))
-})
-
 test('UI audits without a design reference check the Done-when items at desktop and phone sizes', async () => {
-  const waves = structuredClone(PLAN.waves)
-  waves[0].lanes[0].ui = true
-  const { prompt } = await ship(plan({ waves, ui: { areas: [{ name: 'board' }] } }))
-  const audit = prompt('wave 1 audit board')
+  const { prompt } = await ship(plan({ ui: { areas: [{ name: 'board' }] } }))
+  const audit = prompt('the whole diff audit board')
   assert.match(audit, /No design reference: the Done-when items about the screen are the reference/)
   assert.match(audit, /desktop \(1280×720\) and phone \(390×844\)/)
   assert.match(audit, /Issues and Done-when:\n- GAME-1: the board is 10x20/)
@@ -278,7 +257,7 @@ test('a lane the contract has no entry for is logged and builds without contract
 })
 
 test('fix lanes show under the round that made them, and a lane report must cover every item and name a commit', async () => {
-  const finding = { severity: 'should', file: 'src/board.ts', problem: 'step() is not pure', fix: 'copy the queue' }
+  const finding = { severity: 'must', file: 'src/board.ts', problem: 'step() is not pure', fix: 'copy the queue' }
   const { result, calls } = await ship(plan(), {
     'wave 1 review': { findings: [finding] },
     'gate 1': red('line clear is off by one', ['src/board.ts']),
@@ -497,7 +476,7 @@ test('what a pre-merge review lets pass reaches the wave review', async () => {
 })
 
 test('review findings become at most four fix lanes grouped by file; nits are skipped unless security', async () => {
-  const finding = (file, severity = 'should', security = false) => ({ severity, file, problem: `bug in ${file}`, fix: 'fix it', security })
+  const finding = (file, severity = 'must', security = false) => ({ severity, file, problem: `bug in ${file}`, fix: 'fix it', security })
   const findings = ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts'].map(file => finding(file))
   findings.push(finding('f.ts', 'nit'), finding('g.ts', 'nit', true), finding('a.ts', 'must'))
   const { result, labels, logs, calls } = await ship(plan(), { 'wave 1 review': { findings } })
@@ -514,9 +493,9 @@ test('review findings become at most four fix lanes grouped by file; nits are sk
 test('a source file and its tests go to one fix lane, which owns every file its findings name, as repo paths', async () => {
   const findings = [
     { severity: 'must', file: '/repo/src/render.ts', files: ['/repo/src/render.ts', 'src/hud.ts'], problem: 'the preview is clipped', fix: 'size it to the piece' },
-    { severity: 'should', file: 'src/render.test.ts', problem: 'the test pins the clipped size', fix: 'expect the whole piece' },
-    { severity: 'should', file: 'src/input.ts', problem: 'held keys repeat too fast', fix: 'add a delay' },
-    { severity: 'should', file: 'src/hud.spec.ts', problem: 'the HUD test skips the preview', fix: 'cover it' },
+    { severity: 'must', file: 'src/render.test.ts', problem: 'the test pins the clipped size', fix: 'expect the whole piece' },
+    { severity: 'must', file: 'src/input.ts', problem: 'held keys repeat too fast', fix: 'add a delay' },
+    { severity: 'must', file: 'src/hud.spec.ts', problem: 'the HUD test skips the preview', fix: 'cover it' },
   ]
   const { labels, prompt } = await ship(plan(), { 'wave 1 review': { findings } })
   assert.deepEqual(fixBuilds(labels), ['wave-1-review-fix1 build', 'wave-1-review-fix2 build'])
@@ -524,15 +503,15 @@ test('a source file and its tests go to one fix lane, which owns every file its 
   assert.match(prompt('wave-1-review-fix2 build'), /\nOwn: src\/input\.ts, with their tests\./)
 
   // A finding that spans two groups joins them.
-  const spans = { severity: 'should', file: 'src/input.test.ts', files: ['src/input.test.ts', 'src/hud.ts'], problem: 'p', fix: 'f' }
+  const spans = { severity: 'must', file: 'src/input.test.ts', files: ['src/input.test.ts', 'src/hud.ts'], problem: 'p', fix: 'f' }
   const joined = await ship(plan(), { 'wave 1 review': { findings: [...findings, spans] } })
   assert.deepEqual(fixBuilds(joined.labels), ['wave-1-review-fix1 build'])
 })
 
 test('a fix lane names the issues of the lanes whose files it changes', async () => {
   const findings = [
-    { severity: 'should', file: 'src/board.test.ts', problem: 'the test pins a 9-row board', fix: 'expect 20 rows' },
-    { severity: 'should', file: 'docs/notes.md', problem: 'the notes are stale', fix: 'update them' },
+    { severity: 'must', file: 'src/board.test.ts', problem: 'the test pins a 9-row board', fix: 'expect 20 rows' },
+    { severity: 'must', file: 'docs/notes.md', problem: 'the notes are stale', fix: 'update them' },
   ]
   const { prompt } = await ship(plan(), { 'wave 1 review': { findings } })
   assert.match(prompt('wave-1-review-fix1 build'), /^Lane wave-1-review-fix1: GAME-1\./)
@@ -540,7 +519,7 @@ test('a fix lane names the issues of the lanes whose files it changes', async ()
 })
 
 test('a fix lane that only touches docs needs no checks', async () => {
-  const finding = { severity: 'should', file: 'README.md', problem: 'the controls are missing', fix: 'list them' }
+  const finding = { severity: 'must', file: 'README.md', problem: 'the controls are missing', fix: 'list them' }
   const { result, labels, prompt } = await ship(plan(), {
     'wave 1 review': { findings: [finding] },
     'wave-1-review-fix1 build': prompt => ({ ...standard('wave-1-review-fix1 build', prompt), checks: [] }),
@@ -553,7 +532,7 @@ test('a fix lane that only touches docs needs no checks', async () => {
 
 test('the result keeps every fix lane with its decisions and notes, and the text of each nit', async () => {
   const findings = [
-    { severity: 'should', file: 'src/board.ts', problem: 'step() is not pure', fix: 'copy the queue' },
+    { severity: 'must', file: 'src/board.ts', problem: 'step() is not pure', fix: 'copy the queue' },
     { severity: 'nit', file: 'src/input.ts', problem: 'a stray log', fix: 'drop it' },
   ]
   const { result } = await ship(plan(), {
@@ -603,7 +582,7 @@ test('a finding left open goes to the final review, which decides whether it sti
 })
 
 test("fix lanes' notes and edits outside their files reach the final review", async () => {
-  const finding = { severity: 'should', file: 'src/board.ts', problem: 'step() is not pure', fix: 'copy the queue' }
+  const finding = { severity: 'must', file: 'src/board.ts', problem: 'step() is not pure', fix: 'copy the queue' }
   const { prompt } = await ship(plan(), {
     'wave 1 review': { findings: [finding] },
     'wave-1-review-fix1 build': prompt => ({ ...standard('wave-1-review-fix1 build', prompt), open: ['the HUD reads the queue too'] }),
@@ -790,4 +769,145 @@ test('the same files in different waves are fine, and so is a wave with no lanes
   assert.equal((await ship(plan({ waves }))).result.error, undefined)
   const empty = await ship(plan({ waves: [...structuredClone(PLAN.waves), { lanes: [] }] }))
   assert.match(empty.result.error, /wave 3 has no lanes/)
+})
+
+test('a wave review fixes only must and security findings; the rest wait for the whole-diff review', async () => {
+  const must = { severity: 'must', file: 'src/board.ts', problem: 'rows never clear', fix: 'scan every row' }
+  const should = { severity: 'should', file: 'src/input.ts', problem: 'held keys repeat too fast', fix: 'add a delay' }
+  const { result, prompt } = await ship(plan(), { 'wave 1 review': { findings: [must, should] } })
+  assert.doesNotMatch(prompt('wave-1-review-fix1 build'), /held keys/)
+  assert.equal(prompt('wave-1-review-fix2 build'), '')
+  assert.match(prompt('the whole diff review'), /left these open; report each one that still holds again:\n- should src\/input\.ts — held keys repeat too fast/)
+  assert.equal(result.reviews[0].open, 1)
+  assert.equal(result.outcome, 'DONE')
+})
+
+test("the next wave's contract is written while this wave is reviewed", async () => {
+  const waves = [...structuredClone(PLAN.waves.slice(0, 1)), { lanes: [{ id: 'hud', issues: ['GAME-7'], doneWhen: ['the score shows'], owns: ['src/hud.ts'] }] }]
+  const { labels } = await ship(plan({ waves }))
+  assert.ok(labels.indexOf('wave 1 merge') < labels.indexOf('wave 2 contract'))
+  assert.ok(labels.indexOf('wave 2 contract') < labels.indexOf('wave 1 review'))
+})
+
+test('a high-risk lane alone in its wave skips the pre-merge review: the wave review comes right after', async () => {
+  const waves = structuredClone(PLAN.waves)
+  waves[1].lanes[0] = { id: 'score', issues: ['GAME-3'], doneWhen: ['a line scores 100'], owns: ['src/score.ts'], risk: 'high' }
+  waves.push({ lanes: [{ id: 'docs', issues: ['GAME-9'], doneWhen: ['the README lists the controls'], owns: ['README.md'], kind: 'docs' }] })
+  const { labels } = await ship(plan({ waves }))
+  assert.ok(!labels.includes('score review'))
+  assert.ok(labels.includes('wave 2 review'))
+})
+
+test('a lane held back only by its pre-merge review merges after its retries, and the findings get fix lanes', async () => {
+  const waves = structuredClone(PLAN.waves)
+  waves[0].lanes[0].risk = 'high'
+  const must = { severity: 'must', file: 'src/board.ts', line: 40, problem: 'the screen reader hears ids', fix: 'announce titles' }
+  const { result, logs, prompt } = await ship(plan({ waves }), { 'board review': { findings: [must] } })
+  assert.ok(logs.includes("Lane board merges with 1 pre-merge findings for the wave's fix lanes."))
+  assert.ok(result.shipped.some(lane => lane.id === 'board'))
+  assert.match(prompt('wave-1-review-fix1 build'), /must src\/board\.ts:40 — the screen reader hears ids/)
+  assert.equal(result.outcome, 'DONE')
+})
+
+test("a lane after one that didn't ship may leave the items that need it, and no one chases them", async () => {
+  const waves = [...structuredClone(PLAN.waves), { lanes: [{ id: 'motion', issues: ['GAME-7'], doneWhen: ['pieces glide', 'a cleared row fades'], owns: ['src/motion.ts'] }] }]
+  const { result, prompt } = await ship(plan({ waves }), {
+    'input check': failing('1 failed'),
+    'motion build': prompt => {
+      const report = standard('motion build', prompt)
+      report.doneWhen[0] = { ...report.doneWhen[0], met: false, proof: 'needs input: gliding follows the arrow keys' }
+      return report
+    },
+  })
+  assert.match(prompt('wave 3 contract'), /These earlier lanes didn't ship: input \(GAME-2\)/)
+  assert.match(prompt('motion build'), /These earlier lanes didn't ship: input \(GAME-2\)\. Report a Done-when item/)
+  assert.ok(result.shipped.some(lane => lane.id === 'motion'))
+  assert.deepEqual(result.blocked, ['GAME-7: pieces glide (needs input: gliding follows the arrow keys)'])
+  assert.match(prompt('the whole diff review'), /These lanes didn't ship, so don't report what only they would build: input \(GAME-2\)\./)
+  assert.match(prompt('the whole diff review'), /Left unmet because a lane they need didn't ship; don't report these:\n- GAME-7: pieces glide/)
+  assert.equal(result.outcome, 'PARTIAL')
+})
+
+test('an unmet item that names a lane that did ship is still a gap', async () => {
+  const { labels } = await ship(plan(), {
+    'board build': (prompt, nth) => {
+      const report = standard('board build', prompt)
+      if (nth === 1) report.doneWhen[0] = { ...report.doneWhen[0], met: false, proof: 'needs input' }
+      return report
+    },
+  })
+  assert.ok(labels.includes('board fix 1'))
+})
+
+test("a fix lane may leave a finding it won't fix; it merges and that finding stays open", async () => {
+  const musts = [
+    { severity: 'must', file: 'src/board.ts', problem: 'rows never clear', fix: 'scan every row' },
+    { severity: 'must', file: 'src/board.ts', line: 90, problem: 'the reorder settle has no animation', fix: 'animate it' },
+  ]
+  const wontFix = k => (label => prompt => {
+    const report = standard(label, prompt)
+    report.doneWhen[k] = { ...report.doneWhen[k], met: false, proof: "won't fix: reorder is not on this branch" }
+    return report
+  })
+  const { result } = await ship(plan(), {
+    'wave 1 review': { findings: musts },
+    'wave-1-review-fix1 build': wontFix(1)('wave-1-review-fix1 build'),
+    'the whole diff review': { findings: [musts[1]] },
+    'final-review-fix1 build': wontFix(0)('final-review-fix1 build'),
+  })
+  assert.equal(result.lanes.find(lane => lane.id === 'wave-1-review-fix1').merged, true)
+  assert.deepEqual(result.fixed.slice(0, 1), ['must src/board.ts — rows never clear — fix: scan every row'])
+  const left = 'must src/board.ts:90 — the reorder settle has no animation — fix: animate it'
+  assert.deepEqual(result.open, [left])
+  assert.deepEqual(result.gate.failures, [{ problem: left, files: ['src/board.ts'] }])
+  assert.equal(result.gate.green, true)
+  assert.equal(result.outcome, 'PARTIAL')
+})
+
+test("a failure outside the lane that fails on the branch too doesn't drop it; the final gate gets it", async () => {
+  const flaky = { cmd: 'npx playwright test', pass: false, counts: '47 passed, 1 failed (theme.spec.ts)', foreign: true }
+  const { result, labels, prompt } = await ship(plan(), {
+    'input build': prompt => ({ ...standard('input build', prompt), checks: [OK, flaky] }),
+    'input check': prompt => checked(prompt, { checks: [{ ...OK, matchesReport: true }, { ...flaky, matchesReport: true }] }),
+  })
+  assert.match(prompt('input check'), /mark the check foreign: true/)
+  assert.ok(!labels.includes('input fix 1'))
+  assert.deepEqual(result.foreign, ['input: npx playwright test (47 passed, 1 failed (theme.spec.ts))'])
+  assert.equal(result.outcome, 'DONE')
+})
+
+test("a branch with no remote isn't pushed", async () => {
+  assert.match((await ship(plan())).prompt('wave 1 merge'), /Push the branch\./)
+  const local = await ship(plan({ push: false }))
+  assert.match(local.prompt('wave 1 merge'), /Don't push: the branch stays local\./)
+  assert.doesNotMatch(local.prompt('wave 1 merge'), /Push the branch/)
+})
+
+test("a lane's own model and effort override the run's for its builds, not for the contract or its re-check", async () => {
+  const waves = structuredClone(PLAN.waves)
+  waves[0].lanes[0].model = 'opus'
+  waves[0].lanes[0].effort = 'high'
+  waves[0].lanes[1].model = 'haiku'
+  const { calls } = await ship(plan({ waves }), { 'board check': (prompt, nth) => (nth === 1 ? failing('1 failed')(prompt) : checked(prompt)) })
+  const of = label => calls.find(call => call.label === label)
+  assert.deepEqual([of('board build').model, of('board build').effort], ['opus', 'high'])
+  assert.deepEqual([of('board fix 1').model, of('board fix 1').effort], ['opus', 'high'])
+  assert.deepEqual([of('input build').model, of('input build').effort], ['haiku', 'medium'])
+  assert.deepEqual([of('wave 1 contract').model, of('board check').model], ['sonnet', undefined])
+})
+
+test('the same open finding reported by several rounds and auditors is listed once, the most severe kept', async () => {
+  const csrf = line => ({ severity: 'nit', security: true, file: 'server/api.ts', line, problem: `restore can be called cross-site (${line})`, fix: 'check Origin' })
+  const click = { severity: 'should', file: 'src/TaskRow.tsx', line: 74, problem: 'leaving rows take clicks', fix: 'make them inert' }
+  const { result } = await ship(plan({ ui: { areas: [{ name: 'list' }] } }), {
+    'the whole diff review': { findings: [csrf(92), csrf(94), click] },
+    'the whole diff audit list': { findings: [{ ...click, severity: 'must', line: 75 }, csrf(93)] },
+    'final-review-fix1 check': failing('1 failed'),
+    'final-review-fix2 check': failing('1 failed'),
+  })
+  assert.deepEqual(result.open, [
+    'must src/TaskRow.tsx:75 — leaving rows take clicks — fix: make them inert',
+    'nit (security) server/api.ts:92 — restore can be called cross-site (92) — fix: check Origin',
+  ])
+  assert.deepEqual(result.security, ['nit (security) server/api.ts:92 — restore can be called cross-site (92) — fix: check Origin'])
 })

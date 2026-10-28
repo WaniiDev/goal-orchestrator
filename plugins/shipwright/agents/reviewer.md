@@ -20,6 +20,7 @@ You find problems; you never fix them.
   - tests that assert nothing or were weakened;
   - Done-when items without a test;
   - docs that are now false.
+- Severity: `must` breaks a Done-when item, loses or corrupts data, or is exploitable; `should` is a real bug a user can hit; `nit` is style or polish. A state change another site can trigger (cross-site requests, a missing Origin or CSRF check) is at least `should`, with `security: true`.
 - Verify each finding through a real caller path, plus a focused test or probe where cheap. Drop what you can't substantiate, and don't report what is fine.
 - When your task asks for structured output, report through it, one entry per finding. Otherwise, final message: findings ranked must-fix, then should-fix, then nit, one line each:
   `<severity> file:line — <input → wrong result> — <fix>`

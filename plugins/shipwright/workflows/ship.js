@@ -6,8 +6,8 @@ export const meta = {
     { title: 'Contract', detail: 'failing acceptance tests from the Done-when items, before any code' },
     { title: 'Build', detail: 'one implementer per lane in its own worktree; every claim re-run' },
     { title: 'Merge', detail: 'ready lanes into the feature branch, fast checks, push' },
-    { title: 'Review', detail: 'wave reviews, UI audits and fix lanes' },
-    { title: 'Final gate', detail: 'full suites, whole-diff review, last fixes' },
+    { title: 'Review', detail: 'one reviewer per wave; must and security findings get fix lanes' },
+    { title: 'Final gate', detail: 'full suites, whole-diff review and UI audits, last fixes' },
   ],
 }
 
@@ -33,7 +33,15 @@ const DOCS = /\.(md|mdx|rst|txt)$/i
 const CHECK = {
   type: 'object',
   required: ['cmd', 'pass', 'counts'],
-  properties: { cmd: { type: 'string' }, pass: { type: 'boolean' }, counts: { type: 'string' } },
+  properties: {
+    cmd: { type: 'string' },
+    pass: { type: 'boolean' },
+    counts: { type: 'string' },
+    foreign: {
+      type: 'boolean',
+      description: 'with pass false: true only when every failing test is in a file outside the lane, and the same tests fail the same way on the feature branch without the lane',
+    },
+  },
 }
 const LANE = {
   type: 'object',
@@ -265,28 +273,44 @@ async function call(prompt, options) {
   }
 }
 
-function opts(role, label, phaseTitle, schema) {
+// A lane's own model and effort (chosen per lane under --auto) override the run's for its implementer.
+function opts(role, label, phaseTitle, schema, lane) {
   const models = plan.models || {}
   const choice = models[role] || (role === 'auditor' ? models.reviewer : undefined) || {}
+  const own = role === 'implementer' && lane ? lane : {}
   const options = { agentType: TYPE[role], label, phase: phaseTitle, schema }
-  if (choice.model) options.model = choice.model
-  if (choice.effort) options.effort = choice.effort
+  const model = own.model || choice.model
+  const effort = own.effort || choice.effort
+  if (model) options.model = model
+  if (effort) options.effort = effort
   return options
 }
+
+// Earlier lanes that didn't ship: what later lanes and reviews must not wait for.
+const notLanded = () =>
+  planned.filter(lane => lanes.some(done => done.id === lane.id) && !lanes.some(done => done.id === lane.id && done.merged))
+const notLandedText = () =>
+  notLanded()
+    .map(lane => `${lane.id} (${lane.issues.join(', ')})`)
+    .join(', ')
 
 async function writeContract(wave, w) {
   const lanes = plan.contract === false ? [] : wave.lanes.filter(isCode)
   if (lanes.length === 0) return NO_CONTRACT
   const branch = `contract-wave-${w}`
   const tree = `${plan.repo}/.claude/worktrees/${branch}`
+  const unshipped = notLandedText()
   const contract = await call(
     [
       `Write the acceptance contract for wave ${w}. ${WHERE}`,
-      `Work in a throwaway worktree: git -C ${plan.repo} worktree add -b ${branch} ${tree} ${plan.branch} (if branch ${branch} already exists from an earlier attempt, add the worktree on it and check what it holds). For each Done-when item below that an automated test can prove, write a failing acceptance test in the repo's test layout, in new files of each lane's own, named so the lane's own test files stay free (for example <module>.contract.test.ts). Write them as ordinary tests: import what the lane will create the way the code will use it, with no dynamic imports, type copies or any-casts to get around the missing code. Import only the lane's own files and code already on the branch, and build by hand any state another lane's code would make, so no lane waits for another. Run them and confirm each fails only because the feature is missing: a missing module or export counts; a syntax, type or config error in the tests themselves doesn't. Write no feature code and change no config. List every item you can't test as untestable, with why, and put anything else the lane should know (the API the tests expect, the setup they need) in notes.`,
+      `Work in a throwaway worktree: git -C ${plan.repo} worktree add -b ${branch} ${tree} ${plan.branch} (if branch ${branch} already exists from an earlier attempt, add the worktree on it and check what it holds). For each Done-when item below that an automated test can prove, write a failing acceptance test in the repo's test layout, in new files of each lane's own, named so the lane's own test files stay free (for example <module>.contract.test.ts) and so the lane's e2e filter, where it has one, matches its e2e files. Write them as ordinary tests: import what the lane will create the way the code will use it, with no dynamic imports, type copies or any-casts to get around the missing code. Import only the lane's own files and code already on the branch, and build by hand any state another lane's code would make, so no lane waits for another. Scope every UI query to the lane's own part of the screen and its own test data: later lanes add controls and rows, so never assert a page-wide count or that an element is the only one of its role. Run them and confirm each fails only because the feature is missing: a missing module or export counts; a syntax, type or config error in the tests themselves doesn't. If the branch has no test runner installed yet (this wave creates the toolchain), don't install or fetch one to run them: say so in notes. Write no feature code and change no config. List every item you can't test as untestable, with why, and put anything else the lane should know (the API the tests expect, the setup they need) in notes.`,
+      unshipped ? `These earlier lanes didn't ship: ${unshipped}. Write no test for an item that needs their work; list it as untestable with why "needs <lane id>".` : '',
       `Commit the tests on ${branch} as one commit in the brief's format ("Add acceptance tests for wave ${w}"). Don't push. Remove the worktree and keep the branch: each lane brings in only its own tests, so a lane that doesn't ship leaves no failing tests behind.`,
       `Report each lane under its lane id (the word after "Lane"), not its issue keys.`,
-      ...lanes.map(lane => `Lane ${lane.id} (${lane.issues.join(', ')}), will own ${lane.owns.join(', ')}:\n${list(lane.doneWhen)}`),
-    ].join('\n\n'),
+      ...lanes.map(lane => `Lane ${lane.id} (${lane.issues.join(', ')}), will own ${lane.owns.join(', ')}${lane.e2e ? `, e2e filter ${lane.e2e}` : ''}:\n${list(lane.doneWhen)}`),
+    ]
+      .filter(Boolean)
+      .join('\n\n'),
     opts('implementer', `wave ${w} contract`, 'Contract', contractSchema(lanes)),
   )
   if (!contract) {
@@ -316,6 +340,7 @@ function checkPrompt(lane, tree, files, contract, report) {
     `Re-run each check the lane reported; matchesReport says whether your counts match:\n${list(
       (report.checks || []).map(c => `${c.cmd} → ${c.pass ? 'pass' : 'fail'}, ${c.counts}`),
     )}`,
+    `A check that fails only in tests outside ${[...lane.owns, ...files].join(', ')}: run those tests on ${plan.branch} in a throwaway worktree (git -C ${plan.repo} worktree add --detach ${plan.repo}/.claude/worktrees/base-${lane.id} ${plan.branch}, removed afterwards). If they fail the same way there, mark the check foreign: true; it then goes to the final gate, not against this lane.`,
     files.length
       ? `contract: for each file below, what git rev-parse ${contract.sha}:<file> and git rev-parse HEAD:<file> print:\n${list(files)}`
       : 'contract: [] (this lane has no contract tests).',
@@ -323,15 +348,34 @@ function checkPrompt(lane, tree, files, contract, report) {
   ].join('\n')
 }
 
+// Unmet Done-when items the lane may leave: one that needs an earlier lane that didn't ship,
+// and, in a fix lane, a finding it judged not fixable there. Their indexes, in the lane's order.
+function waived(lane, report) {
+  const missing = notLanded().map(other => other.id)
+  return (report.doneWhen || []).flatMap((item, k) => {
+    if (item.met) return []
+    const proof = String(item.proof || '').trim()
+    const needs = /^needs\s+(\S+)/i.exec(proof)
+    if (needs && missing.includes(needs[1].replace(/[.,;:]$/, ''))) return [k]
+    return lane.findings && /^won'?t fix:/i.test(proof) ? [k] : []
+  })
+}
+
+// A failing check counts against the lane unless it fails outside the lane and on the branch too.
+const failing = c => !c.pass && c.foreign !== true
+
 // Plain code over the lane's own report. A gap here sends the lane back without a re-check.
 function reportGaps(lane, report) {
   if (!report) return ['the implementer returned no report']
   const gaps = []
   const items = report.doneWhen || []
   if (items.length !== lane.doneWhen.length) gaps.push(`the report has ${items.length} entries for ${lane.doneWhen.length} Done-when items`)
-  for (const item of items) if (!item.met) gaps.push(`Done-when not met: ${item.item}`)
+  const excused = new Set(waived(lane, report))
+  items.forEach((item, k) => {
+    if (!item.met && !excused.has(k)) gaps.push(`Done-when not met: ${item.item}`)
+  })
   if (isCode(lane) && !(report.checks || []).length) gaps.push('the lane reported no checks')
-  for (const c of report.checks || []) if (!c.pass) gaps.push(`check failing: ${c.cmd} (${c.counts})`)
+  for (const c of report.checks || []) if (failing(c)) gaps.push(`check failing: ${c.cmd} (${c.counts})`)
   if (gaps.length === 0 && report.status !== 'done') {
     gaps.push(...((report.open || []).length ? report.open : ['the lane reported itself unfinished']))
   }
@@ -346,7 +390,8 @@ function checkGaps(lane, wave, files, report, check) {
   const claimed = report.checks || []
   if (reran.length < claimed.length) gaps.push(`only ${reran.length} of the ${claimed.length} reported checks could be re-run`)
   for (const c of reran) {
-    if (!c.pass) gaps.push(`re-run failed: ${c.cmd} (${c.counts})`)
+    if (failing(c)) gaps.push(`re-run failed: ${c.cmd} (${c.counts})`)
+    else if (!c.pass) continue
     else if (!c.matchesReport) gaps.push(`re-run counts differ from the report: ${c.cmd} (${c.counts})`)
   }
   const edited = contractEdits(files, check)
@@ -396,11 +441,18 @@ async function runLane(lane, wave, contract, phaseTitle = 'Build', after = []) {
       : '',
     tests && (tests.notes || []).length ? `From the contract's writer:\n${list(tests.notes)}` : '',
     lane.answers && lane.answers.length ? `The user's answers:\n${list(lane.answers)}` : '',
+    notLanded().length
+      ? `These earlier lanes didn't ship: ${notLandedText()}. Report a Done-when item that can't be met without one of them as met: false, with proof starting "needs <lane id>"; meet the rest.`
+      : '',
+    lane.findings
+      ? 'A finding you judge wrong, or not fixable within these files, may stay: report it met: false with proof starting "won\'t fix:" and why. Fix the rest.'
+      : '',
+    `A check that fails only in tests outside your files, which fail the same way on ${plan.branch} without your change: report it pass: false, foreign: true.`,
   ]
     .filter(Boolean)
     .join('\n')
 
-  let report = await call(task, opts('implementer', `${lane.id} ${after.length ? 'build again' : 'build'}`, phaseTitle, laneSchema(lane)))
+  let report = await call(task, opts('implementer', `${lane.id} ${after.length ? 'build again' : 'build'}`, phaseTitle, laneSchema(lane), lane))
   for (let attempt = 1; ; attempt++) {
     if (plan.mode === 'around' && report && (report.questions || []).length) {
       return { id: lane.id, issues: lane.issues, status: 'questions', questions: report.questions, attempts: attempt }
@@ -418,6 +470,12 @@ async function runLane(lane, wave, contract, phaseTitle = 'Build', after = []) {
       return { id: lane.id, issues: lane.issues, status: 'dropped', gaps, report, attempts: attempt }
     }
     let gaps = reportGaps(lane, report)
+    // Every item left on purpose: nothing to merge, and a retry would only push the lane to do what it judged it can't.
+    const left = report ? waived(lane, report) : []
+    if (gaps.length === 0 && left.length === lane.doneWhen.length) {
+      log(`Lane ${lane.id} left every Done-when item: ${report.doneWhen[0].proof}`)
+      return { id: lane.id, issues: lane.issues, status: 'dropped', gaps: left.map(k => `${lane.doneWhen[k]} (${report.doneWhen[k].proof})`), report, attempts: attempt }
+    }
     let check = null
     if (gaps.length === 0) {
       const recheck = again =>
@@ -432,31 +490,41 @@ async function runLane(lane, wave, contract, phaseTitle = 'Build', after = []) {
       gaps = checkGaps(lane, wave, files, report, check)
     }
     let premerge = []
-    if (gaps.length === 0 && lane.risk === 'high') {
+    let reviewOnly = false
+    // A lane alone in its wave gets the wave review right after it merges, which is the same review.
+    if (gaps.length === 0 && lane.risk === 'high' && others.length) {
       const review = await call(
         `Review lane ${lane.id} before it merges. Worktree ${tree}, read only. Brief: ${plan.brief}. Diff: git diff ${plan.branch}...lane-${lane.id}.\nDone when:\n${list(lane.doneWhen)}`,
         opts('reviewer', `${lane.id} review`, phaseTitle, FINDINGS),
       )
       const found = review ? review.findings : []
       gaps = found.filter(blocking).map(describe)
-      premerge = found.filter(finding => !blocking(finding))
+      reviewOnly = gaps.length > 0
+      premerge = reviewOnly ? found : found.filter(finding => !blocking(finding))
       if (!review) {
         // No answer is not a clean review: the wave review is told to start with this lane.
         log(`Lane ${lane.id}: its pre-merge review did not run.`)
         premerge = [{ severity: 'should', file: `lane-${lane.id}`, problem: 'its high-risk pre-merge review did not run', fix: 'review this lane first, as a pre-merge review would' }]
       }
     }
-    if (gaps.length === 0) {
+    const ready = () => {
       const outside = (check.outsideFiles || []).filter(file => !ownsFile(lane, file))
-      return { id: lane.id, issues: lane.issues, status: 'ready', report, outside, premerge, attempts: attempt }
+      const foreign = (check.checks || []).filter(c => !c.pass && c.foreign === true).map(c => `${lane.id}: ${c.cmd} (${c.counts})`)
+      return { id: lane.id, issues: lane.issues, status: 'ready', report, outside, premerge, foreign, waived: waived(lane, report), attempts: attempt }
     }
+    if (gaps.length === 0) return ready()
     if (attempt > LIMITS.laneRetries) {
+      // Checks green and Done-when met, so only its review's findings hold it: it merges, and they go to the wave's fix lanes.
+      if (reviewOnly) {
+        log(`Lane ${lane.id} merges with ${gaps.length} pre-merge findings for the wave's fix lanes.`)
+        return ready()
+      }
       log(`Lane ${lane.id} dropped after ${attempt} attempts: ${gaps[0]}`)
       return { id: lane.id, issues: lane.issues, status: 'dropped', gaps, report, attempts: attempt }
     }
     report = await call(
       `${task}\n\nYour last attempt left these gaps. Close each one, then report again:\n${list(gaps)}`,
-      opts('implementer', `${lane.id} fix ${attempt}`, phaseTitle, laneSchema(lane)),
+      opts('implementer', `${lane.id} fix ${attempt}`, phaseTitle, laneSchema(lane), lane),
     )
   }
 }
@@ -473,7 +541,7 @@ async function merge(label, lanes, phaseTitle) {
       CHECKS.fast.length
         ? `Then run the fast checks in a clean worktree of the merged head, so the lane worktrees inside the repo stay out of them: git -C ${plan.repo} worktree add --detach ${tree} HEAD, copy in the local config the brief lists, run ${CHECKS.fast.join(' · ')} there, then remove it. Fix only what the merge broke, in the main checkout as its own commit; report anything else as a failed check.`
         : '',
-      "Push the branch. Remove each merged lane's worktree (git worktree remove); keep its branch. Report each lane by the id before its colon.",
+      `${plan.push === false ? "Don't push: the branch stays local." : 'Push the branch.'} Remove each merged lane's worktree (git worktree remove); keep its branch. Report each lane by the id before its colon.`,
     ]
       .filter(Boolean)
       .join('\n\n'),
@@ -583,6 +651,23 @@ async function review(label, diff, scope, extra, withUi, phaseTitle) {
   return { findings: results.filter(Boolean).flatMap(result => result.findings || []), complete: missing === 0 }
 }
 
+// The same finding reported again (by another round, reviewer or auditor): one per file and
+// nearby line, keeping the most severe, so the result lists each open problem once.
+const RANK = { must: 0, should: 1, nit: 2 }
+function dedupe(findings) {
+  const kept = []
+  const sorted = [...findings].sort((a, b) => RANK[a.severity] - RANK[b.severity] || (b.security === true) - (a.security === true))
+  for (const finding of sorted) {
+    const same = kept.some(
+      other =>
+        unitOf(other.file) === unitOf(finding.file) &&
+        (other.line && finding.line ? Math.abs(other.line - finding.line) <= 5 : !other.line && !finding.line),
+    )
+    if (!same) kept.push(finding)
+  }
+  return kept
+}
+
 // Findings that share a file go to the same fix lane, a source file and its tests
 // counting as one, so that no fix needs a file another fix lane owns.
 function groupFindings(findings) {
@@ -629,12 +714,19 @@ async function fix(label, findings, phaseTitle) {
   })
   const built = await buildAndMerge(`${label} fixes`, { lanes: fixLanes }, NO_CONTRACT, phaseTitle, phaseTitle)
   for (const result of built.results) lanes.push({ ...result, merged: built.merged.has(result.id), round: label })
-  const open = fixLanes.filter(lane => !built.merged.has(lane.id)).flatMap(lane => lane.findings)
+  // A merged fix lane closes its findings, except those it reported it won't fix.
+  const left = lane => {
+    const result = built.results.find(one => one.id === lane.id)
+    if (!built.merged.has(lane.id)) return lane.findings
+    const skipped = new Set((result && result.waived) || [])
+    return lane.findings.filter((_, k) => skipped.has(k))
+  }
+  const open = fixLanes.flatMap(left)
   if (open.length) log(`${label}: ${open.length} findings left open.`)
   return {
     merged: [...built.merged],
     open,
-    closed: fixLanes.filter(lane => built.merged.has(lane.id)).flatMap(lane => lane.findings),
+    closed: fixLanes.flatMap(lane => lane.findings.filter(finding => !open.includes(finding))),
     head: built.head,
   }
 }
@@ -713,11 +805,16 @@ let head = plan.base
 let stopped = ''
 // The final review covers a one-wave goal's diff, so that wave gets no review of its own; what it would have been told rides along.
 const carried = []
-// The final audits the screens again only if no wave audited them, or something changed or stayed open after the last audit.
-let audited = false
-let uiAgain = false
+// Failures lanes met outside their own files that fail on the branch too: the final gate's to settle.
+const foreign = []
+// Done-when items left unmet because an earlier lane didn't ship.
+const blockedItems = []
 const shippedNow = () => planned.filter(lane => lanes.some(done => done.id === lane.id && done.merged))
+const notShippedNote = () =>
+  notLanded().length ? `These lanes didn't ship, so don't report what only they would build: ${notLandedText()}.` : ''
 
+// The next wave's contract is written while this wave is reviewed: it needs only the merged lanes.
+let nextContract = null
 for (let i = 0; i < plan.waves.length; i++) {
   const wave = plan.waves[i]
   const w = i + 1
@@ -729,7 +826,8 @@ for (let i = 0; i < plan.waves.length; i++) {
   }
 
   phase('Contract')
-  const contract = await writeContract(wave, w)
+  const contract = await (nextContract || writeContract(wave, w))
+  nextContract = null
 
   phase('Build')
   const built = await buildAndMerge(`wave ${w}`, wave, contract, 'Build', 'Merge')
@@ -740,7 +838,13 @@ for (let i = 0; i < plan.waves.length; i++) {
   const before = head
   if (built.head) head = built.head
   const landed = built.results.filter(result => built.merged.has(result.id))
-  for (const result of landed) untestable.push(...untestableOf(contract, result.id).map(item => `${result.issues.join(', ')}: ${item}`))
+  for (const result of landed) {
+    untestable.push(...untestableOf(contract, result.id).map(item => `${result.issues.join(', ')}: ${item}`))
+    foreign.push(...(result.foreign || []))
+    const items = planned.find(lane => lane.id === result.id).doneWhen
+    blockedItems.push(...(result.waived || []).map(k => `${result.issues.join(', ')}: ${items[k]} (${result.report.doneWhen[k].proof})`))
+  }
+  if (i + 1 < plan.waves.length && !stopped && !budgetLow()) nextContract = writeContract(plan.waves[i + 1], w + 1)
 
   const shippedCode = wave.lanes.filter(lane => isCode(lane) && built.merged.has(lane.id))
   if (shippedCode.length === 0) continue
@@ -748,6 +852,8 @@ for (let i = 0; i < plan.waves.length; i++) {
     carried.push(handOff(landed, NO_CONTRACT))
     continue
   }
+  // One reviewer, no UI audits: the screens are audited once, at the final gate. Only must and security
+  // findings get fix lanes here; the rest wait for the whole-diff review, which judges them again.
   phase('Review')
   const scope = list(shippedCode.map(lane => `${lane.issues.join(', ')}: ${lane.doneWhen.join('; ')}`))
   const later = plan.waves.slice(i + 1).flatMap(next => next.lanes)
@@ -756,20 +862,19 @@ for (let i = 0; i < plan.waves.length; i++) {
     later.length
       ? `Later waves still build these, so don't report them as missing:\n${list(later.map(lane => `${lane.issues.join(', ')}: ${lane.doneWhen.join('; ')}`))}`
       : '',
+    notShippedNote(),
   ]
     .filter(Boolean)
     .join('\n')
-  const withUi = shippedCode.some(lane => lane.ui)
-  const found = await review(`wave ${w}`, `${before}..${head}`, scope, extra, withUi, 'Review')
-  const fixed = await fix(`wave ${w} review`, found.findings, 'Review')
+  const found = await review(`wave ${w}`, `${before}..${head}`, scope, extra, false, 'Review')
+  // What a lane's pre-merge review still held against it when the lane merged anyway.
+  const held = landed.flatMap(result => (result.premerge || []).filter(blocking))
+  const fixed = await fix(`wave ${w} review`, [...found.findings.filter(blocking), ...held], 'Review')
   if (fixed.head) head = fixed.head
-  if (withUi && plan.ui) {
-    audited = true
-    uiAgain = fixed.open.length > 0 || fixed.merged.length > 0
-  } else if (fixed.merged.length) uiAgain = true
-  open.push(...fixed.open)
+  const deferred = found.findings.filter(finding => actionable(finding) && !blocking(finding))
+  open.push(...fixed.open, ...deferred)
   closed.push(...fixed.closed)
-  reviews.push(summary(`wave ${w}`, found.findings, fixed))
+  reviews.push(summary(`wave ${w}`, found.findings, { open: [...fixed.open, ...deferred] }))
 }
 
 phase('Final gate')
@@ -792,7 +897,6 @@ for (let round = 1; FULL.length > 0 && !stopped; round++) {
   }))
   const fixed = await fix(`gate ${round}`, failures, 'Final gate')
   if (fixed.head) head = fixed.head
-  if (fixed.merged.length) uiAgain = true
   closed.push(...fixed.closed)
   open.push(...fixed.open)
   if (fixed.merged.length === 0) {
@@ -808,13 +912,16 @@ if (isGreen(gate)) {
     closed.length ? `Earlier rounds fixed these; check each fix holds:\n${list(closed.map(describe))}` : '',
     open.length ? `Earlier rounds left these open; report each one that still holds again:\n${list(open.map(describe))}` : '',
     untestable.length ? `No automated test proves these, so check each by hand:\n${list(untestable)}` : '',
+    notShippedNote(),
+    blockedItems.length ? `Left unmet because a lane they need didn't ship; don't report these:\n${list(blockedItems)}` : '',
     // No wave review saw what the fix lanes left: their notes and their edits outside what they own.
     handOff(lanes.filter(lane => lane.merged && !planned.some(entry => entry.id === lane.id)), NO_CONTRACT),
     ...carried,
   ]
     .filter(Boolean)
     .join('\n')
-  const final = await review('the whole diff', `${plan.base}..${head}`, scope, extra, Boolean(plan.ui) && (!audited || uiAgain), 'Final gate')
+  // The only UI audit of the run: every area, on the finished screens.
+  const final = await review('the whole diff', `${plan.base}..${head}`, scope, extra, Boolean(plan.ui), 'Final gate')
   const fixed = await fix('final review', final.findings, 'Final gate')
   if (fixed.head) head = fixed.head
   closed.push(...fixed.closed)
@@ -843,7 +950,8 @@ const notShipped = planned
     return { id: lane.id, issues: lane.issues, why }
   })
 const green = isGreen(gate)
-const blockingOpen = open.filter(blocking)
+const stillOpen = dedupe(open)
+const blockingOpen = stillOpen.filter(blocking)
 const outcome =
   shippedIds.size === 0
     ? 'BLOCKED'
@@ -868,12 +976,23 @@ return {
   })),
   // Done-when items of shipped lanes that no automated test proves: for the PR's manual checks.
   untestable,
+  // Done-when items of shipped lanes left unmet because a lane they need didn't ship.
+  blocked: blockedItems,
+  // Failures lanes met outside their own files that also fail on the branch.
+  foreign,
   reviews,
-  gate: gate ? { green, checks: gate.checks, failures: green ? [] : gate.failures || [] } : { green: false, checks: [], note: FULL.length ? 'the gate did not run' : 'the plan lists no checks' },
+  // green is the checks. A green gate's failures are the must and security findings still open, which keep the run from DONE.
+  gate: gate
+    ? {
+        green,
+        checks: gate.checks,
+        failures: green ? blockingOpen.map(f => ({ problem: describe(f), files: filesOf(f) })) : gate.failures || [],
+      }
+    : { green: false, checks: [], note: FULL.length ? 'the gate did not run' : 'the plan lists no checks' },
   // Findings whose fix lanes merged, every round's; nits get no fix lane, so they are in reviews.
   fixed: closed.map(describe),
-  open: open.map(describe),
-  security: open.filter(f => f.security === true).map(describe),
+  open: stillOpen.map(describe),
+  security: stillOpen.filter(f => f.security === true).map(describe),
   questions,
   stopped,
   // Output tokens this turn spent, the workflow's agents and the main loop's: what the ship phase cost.

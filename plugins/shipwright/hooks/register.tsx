@@ -307,7 +307,7 @@ function planLine(plan: ActivePlan): string {
     'A /shipwright:plan is active in this session: it takes an idea to tickets, then ships them with /shipwright:run.',
     `The idea: ${plan.goal}`,
     `Stage: ${plan.stage}${plan.issue ? ` (${plan.issue})` : ''}. When the stage is done, call plan_step (load ${PLAN_STEP} with ToolSearch) with the next stage and end your turn; the plugin runs the next command.`,
-    "- wayfinder, then spec: once the way is clear (wayfinder found no fog, or every map ticket is closed). That is how to proceed; don't ask. If the map still has open tickets, tell the user to work them with /wayfinder <map> and to run /shipwright:plan <map> once the way is clear, then call plan_step with stop.",
+    "- wayfinder, then spec: once the way is clear. Wayfinder making no map is normal: when nothing needs research, a prototype or more decisions, go straight to spec with no map. With a map, once every map ticket is closed. That is how to proceed; don't ask. If the map still has open tickets, tell the user to work them with /wayfinder <map> and to run /shipwright:plan <map> once the way is clear, then call plan_step with stop.",
     '- spec, then tickets: once the spec is published, with its issue.',
     '- tickets, then ship: once the user approved the tickets and they are published as sub-issues of the spec, with the spec issue (or, for a local-markdown tracker, the folder the ticket files are in).',
     'If a stage cannot go on (no issue tracker set up: /setup-matt-pocock-skills), tell the user and call plan_step with stop.',
@@ -401,7 +401,9 @@ export const register: Register = on => {
       if (ship === undefined) return { deny: '/shipwright:run is not in this session; reload the plugin.' }
       const runArgs = extra ? ` ${extra}` : ''
       // A local-markdown tracker's tickets are files in a folder, not sub-issues.
-      const work = /[\\/]|\.md$/.test(issue) ? `the tickets in ${issue}` : `${issue} and its sub-issues`
+      // The spec named at the tickets stage, when the tickets live elsewhere (a local folder): the run reads it too.
+      const spec = plan?.issue && plan.issue !== issue ? ` (spec: ${plan.issue})` : ''
+      const work = /[\\/]|\.md$/.test(issue) ? `the tickets in ${issue}${spec}` : `${issue} and its sub-issues${spec}`
       await $.state.set(PLAN, null)
       // Queued in order for when the session is idle: the run starts from the tickets, not the planning talk.
       $.clock.after(0, () => {
@@ -639,7 +641,9 @@ export const register: Register = on => {
     if (run.phase === 'ended' || run.phase === 'stopped') {
       run = null
       await save($)
-      clearGoal($)
+      // The reply's GOAL line meets the /goal condition, which clears itself, and a stop already cleared it:
+      // another /goal clear would only print "No goal set" as the session's last word.
+      await $.state.set(GOAL, null)
     }
     return done
   })

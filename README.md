@@ -10,7 +10,7 @@ A Claude Code plugin that ships a goal (an issue and its sub-issues, a plan doc,
    - **Contract first.** An agent turns the Done-when items into failing acceptance tests before any feature code exists.
    - **Lanes.** Implementer agents build in parallel, each in its own worktree from the feature branch, with its own database and port, and make the contract tests pass without editing them. A lane that needs another lane's work waits and builds again once that one merges.
    - **Re-checked claims.** An integrator re-runs every check a lane reports, compares the counts, and confirms the contract tests are untouched and no lane edited another's files. Gaps go back to the lane, at most twice; then the lane is dropped and the run ends `PARTIAL` instead of looping. High-risk lanes get a review before they merge.
-   - **Merge and review.** Ready lanes merge and the fast checks run in a clean worktree. A reviewer (and, for goals with screens, UI auditors with real screenshots) checks the wave and whatever no test can prove, and findings become fix lanes.
+   - **Merge and review.** Ready lanes merge and the fast checks run in a clean worktree. One reviewer checks the wave and whatever no test can prove; must and security findings become fix lanes, and the rest wait for the whole-diff review. For goals with screens, UI auditors take real screenshots once, at the final gate.
 4. **Final gate.** The full suites, up to two fix rounds, then a whole-diff review that also checks every earlier finding: fixed ones still hold, open ones are reported again or closed.
 5. **Deliver.** The PR with Issues, Decisions, Migrations, Ops notes and Tests; CI driven to green; a merge if you chose it; tracker checkpoints; and your final results.
 
@@ -76,7 +76,7 @@ Headless (`claude -p`): set `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`. Otherwise 
 
 Every run, without being told, goes in one go (no "shall I continue?", no waiting on the plan), runs in parallel (as many lanes per wave as have disjoint files), and updates the issues along the way (In Progress with the plan, a checkpoint per issue after the ship phase, In Review with the PR, Done after the merge). Leave one unpicked in the intake, or say it: "no tracker updates", "one lane at a time".
 
-`--auto` skips the intake and uses the defaults: Sonnet · medium to build, Opus · xhigh to review, away mode, PR only (branch only when origin is missing or a local path; never merges without your yes), all four ways of running on, 8 h, UI checks at desktop and phone sizes. Results: the chat summary, the PR body, and tracker checkpoints when the run can reach the tracker (a connector such as Linear's, `gh`, `glab`, or local issue files).
+`--auto` skips the intake and uses the defaults: models picked per lane after recon (Haiku · low for docs-only lanes, Sonnet · medium for well-specified features, Opus · high for high-risk or big lanes; Opus · xhigh or high to review), away mode, PR only (branch only when origin is missing or a local path; never merges without your yes), all four ways of running on, 8 h, UI checks at desktop and phone sizes. Results: the chat summary, the PR body, and tracker checkpoints when the run can reach the tracker (a connector such as Linear's, `gh`, `glab`, or local issue files).
 
 ## Contents
 
@@ -94,7 +94,9 @@ Every run, without being told, goes in one go (no "shall I continue?", no waitin
 - The generic rules live once, in the agent definitions. `BRIEF.md` is a ~50-line repo profile that agents read instead of the steering docs.
 - Agents don't load CLAUDE.md (`omitClaudeMd`; the brief carries the rules that apply) and see only the tools they use, not every tool and MCP server the session has.
 - Agents report schema-checked JSON, so nothing is parsed twice or re-asked. Mechanical re-checks and merges run on Sonnet · low.
-- A one-wave goal is reviewed once, by the whole-diff review. The final UI audit runs again only for screens no wave audited, or when a fix merged or a finding stayed open after the last audit.
+- A one-wave goal is reviewed once, by the whole-diff review. The UI audit runs once, at the final gate, on the finished screens.
+- A wave review is one reviewer, and only its must and security findings get fix lanes. The next wave's contract tests are written while it runs. A high-risk lane gets a review of its own before it merges only when other lanes build alongside it.
+- A lane whose only problem is its pre-merge review's findings merges after its retries, and those findings go to fix lanes. Lanes after a dropped lane leave the items that need it, and a fix lane may leave a finding it judges wrong, so no lane burns retries on work it can't do.
 - Docs-only and test-only lanes skip contract tests and review. A blocked lane stops at once instead of retrying.
 - The watchdog stops loops before they burn tokens.
 - Measured: the final results show the ship phase's output tokens, and, in the desktop app, your plan's 5-hour and weekly usage before and after the run and the orchestrator's context size (read with the app's `get_usage` tool; the CLI and cloud sessions don't have it).
