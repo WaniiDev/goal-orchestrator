@@ -64,6 +64,7 @@ On every turn of a run (after `/goal` starts one, a compaction, a resume or an a
 - Keep waves few, 3 or fewer where the dependencies allow: each wave pays a contract, a merge and a review before the next can start. A chain of small tickets that each need the one before (A, then B, then C) is one lane whose implementer builds them in order, not a wave each.
 - **Models per lane** (only under `--auto`, where the intake didn't ask): give each lane `model` and `effort` by what recon learned. Docs, copy or renames only: `haiku` · `low`. A well-specified feature: `sonnet` · `medium`. `risk: "high"`, or a big lane (3+ issues, or about 12+ Done-when items): `opus` · `high`. Reviewers: `opus` · `xhigh` when any lane is high-risk or there are 2+ waves, else `opus` · `high`. Log each choice and why in `DECISIONS.md`. A model the user named wins.
 - You write no product code: shared code (types, primitives, scaffolding) is a lane of an early wave, so it gets contract tests and a review like the rest. Before launching, check each wave: no lane's Done-when items need code that another lane of the same wave owns.
+- Every way the goal says to run the app (a dev server through a proxy, a production start) is a Done-when item of the lane that adds it, proven by an e2e smoke test that adds and reads data through it: the gate's e2e runs only one of them.
 - Write `BRIEF.md` from the [template](references/brief-template.md). It is the distilled repo profile that every agent reads instead of the steering docs.
 - Write the plan into `RUN.md`:
   ```json
@@ -97,7 +98,7 @@ Follow [delivery](references/delivery.md):
 2. Drive CI to green, then merge if the finish line says so.
 3. Update the tracker.
 4. If Step 0a measured usage, call `get_usage` again and write `usage.after` into `RUN.md` the same way. Then read [report](../report/SKILL.md) as a file (only the user can invoke it as a skill) and write the final results in its format.
-5. Clean up: remove the worktrees in `leftover` and any left under `.claude/worktrees/`, delete the `contract-wave-*` branches and the merged `lane-*` ones (`git branch -d` keeps a dropped lane's unmerged work), and stop watching the PR after the merge.
+5. Clean up: remove the worktrees in `leftover` and any left under `.claude/worktrees/`, delete the `contract-*` branches and the merged `lane-*` ones (`git branch -d` keeps a dropped lane's unmerged work), and stop watching the PR after the merge.
 6. Call `run_finish` last.
 
 ## Stop conditions

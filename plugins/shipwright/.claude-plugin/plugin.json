@@ -1,6 +1,6 @@
 {
   "name": "shipwright",
-  "version": "4.0.0",
+  "version": "4.0.1",
   "description": "Ship a goal (an issue and its sub-issues) as one PR on one branch: intake asks which models and effort to use and whether you will be away, then the orchestrator drives implementer sub-agents in waves in their own worktrees: contract tests first, every claim checked, lanes merged as they're ready, reviews per wave, a final gate and a whole-diff review. You get the PR, tracker updates and a final report. A built-in watchdog ends the run as DONE, PARTIAL or BLOCKED instead of looping.",
   "author": { "name": "WaniiDev" },
   "keywords": ["orchestration", "subagents", "worktrees", "pull-requests", "review", "linear"],

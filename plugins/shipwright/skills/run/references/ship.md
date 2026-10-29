@@ -10,23 +10,27 @@ Every agent runs in the background (its definition says so), with `model` and `e
 
 ### 1. Contract
 
-When the plan has `contract` on and the wave has code lanes. Wave 1's starts after the plan; each later wave's is written while the wave before it is reviewed. Launch `shipwright:implementer` named `contract-<w>`:
+When the plan has `contract` on: one contract per code lane, all at once, so each lane starts as soon as its own tests are in. Skip it for a wave whose branch has no test runner yet (the wave that creates the toolchain): the tests could only come back empty. Wave 1's start after the plan; each later wave's are written while the wave before it is reviewed. Launch `shipwright:implementer` named `contract-<id>` for each lane:
 ```
-Write the acceptance contract for wave <w>. Main checkout <repo>, feature branch <branch>. Brief: <BRIEF.md>.
-Work in a throwaway worktree: git -C <repo> worktree add -b contract-wave-<w> <repo>/.claude/worktrees/contract-wave-<w> <branch>. For each Done-when item below that an automated test can prove, write a failing acceptance test in the repo's test layout, in new files of each lane's own, named so the lane's own test files stay free (for example <module>.contract.test.ts) and so the lane's e2e filter, where it has one, matches its e2e files. Write them as ordinary tests: import what the lane will create the way the code will use it, with no dynamic imports, type copies or any-casts. Import only the lane's own files and code already on the branch, and build by hand any state another lane's code would make, so no lane waits for another. Scope every UI query to the lane's own part of the screen and its own test data: never assert a page-wide count or that an element is the only one of its role. Run them and confirm each fails only because the feature is missing (a missing module or export counts; an error in the tests themselves doesn't). If the branch has no test runner yet, don't install one: say so in a NOTE. Write no feature code and change no config.
+Write the acceptance contract for lane <id> (<issues>). Main checkout <repo>, feature branch <branch>. Brief: <BRIEF.md>.
+Work in a throwaway worktree: git -C <repo> worktree add -b contract-<id> <repo>/.claude/worktrees/contract-<id> <branch>. For each Done-when item below that an automated test can prove, write a failing acceptance test in the repo's test layout, in new files named so the lane's own test files stay free (for example <module>.contract.test.ts) and so the e2e filter <filter> matches its e2e files. Write them as ordinary tests: import what the lane will create the way the code will use it, with no dynamic imports, type copies or any-casts. Import only the lane's own files and code already on the branch, and build by hand any state another lane's code would make, so the lane waits for no other. Scope every UI query to the lane's own part of the screen and its own test data: never assert a page-wide count or that an element is the only one of its role, and scroll an element into view before measuring or dragging it. Run them and confirm each fails only because the feature is missing (a missing module or export counts; an error in the tests themselves doesn't). Write no feature code and change no config.
 <if lanes didn't ship: These earlier lanes didn't ship: <id (issues)>. Write no test for an item that needs their work; list it as untestable with why "needs <lane id>".>
-Commit the tests on contract-wave-<w> as one commit ("Add acceptance tests for wave <w>"). Don't push. Remove the worktree and keep the branch.
-Report, under each lane's id:
+Commit the tests on contract-<id> as one commit ("Add acceptance tests for <issues>"). Don't push. Remove the worktree and keep the branch.
+The lane will own <owns>. Done when:
+1. <item>
+Report:
 CONTRACT <sha | none>
-FILES <lane id>: <path>, …
-UNTESTABLE <lane id>: <Done-when item> — <why>      (one line each)
-NOTE <lane id>: <what the lane should know, such as the API the tests expect>
-Lane <id> (<issues>), will own <owns>[, e2e filter <filter>]:
-- <Done-when item>
+FILES <path>, …
+UNTESTABLE <Done-when item> — <why>      (one line each)
+NOTE <what the lane should know, such as the API the tests expect>
 ```
-No answer, or no entry for a lane: that lane builds without contract tests; say so in `DECISIONS.md`.
+No answer: the lane builds without contract tests; say so in `DECISIONS.md`.
+
+**A wrong contract test** (it fails because of the test, not the code, such as an element off-screen or data a shared DB left behind): approve a named fix that changes no assertion, have the lane commit it as its own commit, log it in `DECISIONS.md`, and from then on check the lane against that commit's version of the file. Never drop a lane over its contract's own fault.
 
 ### 2. Lanes
+
+**Shared config.** When two lanes of a wave need the same change to a shared file (a dependency in `package.json`, a script, a config entry), make it yourself on the feature branch before they start, as its own commit, and log it in `DECISIONS.md`. It is the only code you commit.
 
 For each lane: `git worktree add -b lane-<id> <repo>/.claude/worktrees/lane-<id> <branch>` (not `isolation: "worktree"`: it branches from the default branch), and copy in any untracked local config the brief lists. Launch `shipwright:implementer` named `lane-<id>`:
 ```
@@ -38,7 +42,7 @@ Own: <owns>, with their tests. Don't touch: <avoid>.
 <others building: Building alongside you: <id (owns)>; …. If you can't finish without one of them, report blocked with its id in NEEDS.>
 DB <db>, port <port>. e2e filter: <filter>.
 Report at least these checks: <fast checks>.
-<contract: Contract tests: first bring in your own with git checkout <contract sha> -- <files> and commit them ("Add acceptance tests for <issues>"). Make them pass and never edit them.>
+<contract: Contract tests: first bring them in with git checkout <contract sha> -- <files> and commit them ("Add acceptance tests for <issues>"). Make them pass and never edit them; if one is wrong in itself, say so in OPEN with why.>
 <notes: From the contract's writer: <notes>>
 <answers: The user's answers: <answers>>
 <lanes didn't ship: These earlier lanes didn't ship: <id (issues)>. Report a Done-when item that can't be met without one of them as not met, with proof starting "needs <lane id>"; meet the rest.>
@@ -57,7 +61,7 @@ Its gaps, first from the report:
 
 No gaps in the report: check it yourself, in one Bash call in its worktree:
 - `git status --porcelain` prints nothing;
-- the contract tests are untouched: `git diff --quiet <contract sha> HEAD -- <files>`;
+- the contract tests are untouched: `git diff --quiet <contract sha> HEAD -- <files>` (after an approved fix to one, compare that file with the fix's commit);
 - `git diff --name-only <branch>...HEAD`: a file another lane of this wave owns is a gap; any other file outside its own goes to the wave review;
 - re-run the fast checks and its contract tests (`cmd > <log> 2>&1; echo "exit=$?"`, then the summary line), and compare the counts with the report. A failure only in tests outside the lane: run them on `<branch>` in a throwaway worktree (`git worktree add --detach <repo>/.claude/worktrees/base-<id> <branch>`, removed after). Failing the same way there, it is **foreign**: list it for the final gate, not against the lane.
 
@@ -71,17 +75,17 @@ Merge each lane as soon as it is ready; don't wait for the rest of the wave. In 
 
 ### 5. Review the wave
 
-When every lane of the wave has merged or dropped. Skip it for a wave with no code lane merged, and for a one-wave plan (the whole-diff review covers it). Launch one `shipwright:reviewer` named `review-wave-<w>` with the wave prompt, and the next wave's contract at the same time. No UI audits here: the screens are audited once, at the final gate.
+When every lane of the wave has merged or dropped. Skip it for a wave with no code lane merged, and for the last wave (the whole-diff review right after the gate covers it). Launch one `shipwright:reviewer` named `review-wave-<w>` with the wave prompt, and the next wave's contracts at the same time. No UI audits here: the screens are audited once, at the final gate.
 
 Its `must` and security findings, plus any a high-risk lane merged with, become **fix lanes**: group findings that share a file (a source file and its tests count as one), at most 4 lanes, each owning the files its findings name, its Done-when items the findings (`<severity> <file>:<line> — <problem> — fix: <fix>`), its id `w<w>-fix<n>`. They run like lanes, without a contract. A fix lane that no next-wave lane overlaps builds alongside the next wave; one that does merges first. `should` findings stay open for the whole-diff review; nits are listed in the results. A merged fix lane closes its findings, except those it left with `won't fix:`.
 
-Then the next wave, once its contract is in.
+Then the next wave: each lane starts once its own contract is in.
 
 ## Final gate
 
 After the last wave and its fix lanes. If the base moved, merge it in first (prefer that to rebasing). In a clean worktree of the head (`check-gate-<n>`), run every gate command in the background and record exact counts in `RUN.md`. Each failure (the failing tests, the likely cause, the files) becomes a `must` fix lane; at most 2 fix rounds, and stop early when no fix merges. A flaky test is root-caused, and its fix proven with about 10 repeats.
 
-Green: launch the whole-diff review and, with `ui` in the plan, one `shipwright:ui-auditor` per area (one for every screen when there are no areas), all at once, with the final prompts. Every actionable finding (`must` and `should`; security nits too) becomes a fix lane. The whole-diff review judges every earlier open finding again, so what it leaves open replaces them. If any fix merged, run the gate once more.
+Green: launch the whole-diff review and, with `ui` in the plan, one `shipwright:ui-auditor` per area (one for every screen when there are no areas), all at once, with the final prompts. Wait for all of them, then group every finding by file. Every actionable finding (`must` and `should`; security nits too) becomes a fix lane. The whole-diff review judges every earlier open finding again, so what it leaves open replaces them. If any fix merged, run the gate once more.
 
 ## Result
 

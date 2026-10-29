@@ -28,7 +28,7 @@ Earlier rounds left these open; report each one that still holds again: <open fi
 No automated test proves these, so check each by hand: <untestable items>
 These lanes didn't ship, so don't report what only they would build: <id (issues)>.
 Left unmet because a lane they need didn't ship; don't report these: <blocked items>
-<a one-wave plan, or fix lanes no wave review saw: their notes and files outside their own, as in the wave review>
+<the last wave's lanes and any fix lanes, which no wave review saw: their untested items, notes and files outside their own, as in the wave review>
 ```
 
 **UI audit** (one per area, at the final gate)
