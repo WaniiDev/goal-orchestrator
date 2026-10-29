@@ -43,7 +43,7 @@ branch: <feature branch>
 started: <ISO time>
 ```
 Where each answer goes:
-- The models are the user's explicit choice: the plan's `models` (without workflows: `model` and `effort` on every `Agent` call).
+- The models are the user's explicit choice: the plan's `models`, passed as `model` and `effort` on every agent of that role.
 - `defaults`: [the run skill](../SKILL.md)'s "Every run" rules for one go, parallel and tracker updates; without `contract`, the plan's `"contract": false`.
 - `budget`: `run_start`'s `max_hours`.
 - `ui`: the plan's `ui.sizes` (`desktop 1280×720` for desktop only); `skip` leaves `ui` out of the plan.

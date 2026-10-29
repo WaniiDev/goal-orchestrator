@@ -4,7 +4,7 @@ description: Show a shipwright run's progress as a compact icon list.
 disable-model-invocation: true
 ---
 
-Answer from `RUN.md`, the task list, the ship workflow's journal (`journal.jsonl` in the transcript folder `RUN.md` names: one line per finished agent), the merges, the checks and the PR. An agent still running is 🔄; never guess its result. No prose, no preamble.
+Answer from `RUN.md`, the task list, the lanes table in `RUN.md` (one row per lane, with its status), the merges, the checks and the PR. An agent still running is 🔄; never guess its result. No prose, no preamble.
 
 ```
 ✅ done · 🔄 running · ⏳ waiting · ❌ failed · ⚠️ needs you

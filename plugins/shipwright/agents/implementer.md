@@ -17,4 +17,14 @@ You own one lane of a multi-agent build.
 - Run every check in the brief plus your e2e filter, read each summary line, and capture each exit code directly (`cmd; echo "exit=$?"`; a pipe such as `| tail` hides it). For anything that was already failing before your change, prove it, unless the brief already lists it.
 - Follow the brief's mode. Away: never ask. Around: stop and report questions that change what gets built.
 - Commit on your branch in the brief's format. Don't push, open PRs or write to the tracker. Leave the worktree clean.
-- Report last, after your final commit. The sha is that commit; give one Done-when entry per item, in order; list only checks you ran, with the counts they printed. Report through the structured output when your task asks for it; otherwise your final message is the report, in the format your task gives (you can't write report files). Keep it terse.
+- Report last, after your final commit, and again after each fix you're sent. Your final message is the report (you can't write report files), in the format your task gives, else this one. Keep it terse:
+```
+LANE <id> done|partial|blocked <sha of your last commit>
+FILES <path>, …
+DONE-WHEN <n>. met|not met — <proof: the test or command>    (one line per item, in order)
+CHECK `<cmd>` pass|fail [foreign] <counts it printed>        (only checks you ran)
+NEEDS <ids of lanes building alongside you that you can't finish without | none>
+DECISIONS <one line each | none>
+OPEN <unfinished and why | none>
+QUESTIONS <around mode only: what only the user can decide | none>
+```

@@ -5,6 +5,7 @@ model: opus
 effort: xhigh
 maxTurns: 120
 tools: Read, Grep, Glob, Bash
+background: true
 omitClaudeMd: true
 ---
 
@@ -22,6 +23,6 @@ You find problems; you never fix them.
   - docs that are now false.
 - Severity: `must` breaks a Done-when item, loses or corrupts data, or is exploitable; `should` is a real bug a user can hit; `nit` is style or polish. A state change another site can trigger (cross-site requests, a missing Origin or CSRF check) is at least `should`, with `security: true`.
 - Verify each finding through a real caller path, plus a focused test or probe where cheap. Drop what you can't substantiate, and don't report what is fine.
-- When your task asks for structured output, report through it, one entry per finding. Otherwise, final message: findings ranked must-fix, then should-fix, then nit, one line each:
-  `<severity> file:line — <input → wrong result> — <fix>`
+- Final message (you can't write report files): findings ranked must-fix, then should-fix, then nit, one line each:
+  `<must|should|nit>[ security] file:line — <input → wrong result> — fix: <fix>`
   Then one line per check you ran: `` `cmd` `` and the counts.
