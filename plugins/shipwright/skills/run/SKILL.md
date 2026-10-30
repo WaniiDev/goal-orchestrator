@@ -86,7 +86,7 @@ On every turn of a run (after `/goal` starts one, a compaction, a resume or an a
 
 ## Step 3: Ship
 
-1. Follow [ship](references/ship.md): per wave, the contract tests, one implementer per lane in its own worktree, your check of each report (gaps go back to the same agent, at most 2 retries, then the lane is dropped), a merge as each lane is ready, and one review whose must and security findings become fix lanes. Then the final gate, with up to 2 fix rounds, and the whole-diff review with the UI audits. It ends with `reports/ship.json`.
+1. Follow [ship](references/ship.md): per wave, the contract tests (one per lane), one implementer per lane in its own worktree, your check of each report (gaps go back to the same agent, at most 2 retries, then the lane is dropped), a merge as each lane is ready, and, for every wave but the last, one review whose must and security findings become fix lanes. Then the final gate, with up to 2 fix rounds, and the whole-diff review with the UI audits. It ends with `reports/ship.json`.
 2. Add to `RUN.md` the head, the gate checks and `gate.failures`, what shipped and what didn't and why, the `untestable` and `blocked` items, any `foreign` failures, the findings fixed and still open, and `tokens`; append every lane's decisions, fix lanes included, to `DECISIONS.md`. Unless tracker updates are off, post a checkpoint on each issue: shipped (with the checks that prove it) or not shipped and why.
 3. Open security findings are never dropped: fix them, ask (around), or put them first in the PR (away).
 4. Lanes that didn't ship go in the PR and the results as not shipped, with the reasons; don't start another run for them.
